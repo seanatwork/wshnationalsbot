@@ -46,3 +46,7 @@ Thumbs.db
 # Railway
 railway.toml
 .env
+
+# Cache files
+*_cache.json
+*.json.cache

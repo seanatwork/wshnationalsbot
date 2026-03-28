@@ -3,3 +3,4 @@ MLB-StatsAPI
 pytz
 python-dotenv
 flask
+requests

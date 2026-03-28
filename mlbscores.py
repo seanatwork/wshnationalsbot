@@ -75,7 +75,7 @@ def mlb_scores(context):
 
 def schedule(team_id, user_timezone):
     start = date.today()
-    end = start + timedelta(days=4)
+    end = start + timedelta(days=7)
     sched = statsapi.schedule(team=team_id, start_date=start, end_date=end)
     if not sched:
         return "No schedule found"
