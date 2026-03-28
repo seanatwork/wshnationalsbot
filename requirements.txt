@@ -2,3 +2,4 @@ python-telegram-bot[job-queue]==20.3
 MLB-StatsAPI
 pytz
 python-dotenv
+flask
