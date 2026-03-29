@@ -290,3 +290,94 @@ async def alcentral_standings(update, context):
         text=message,
         parse_mode="HTML")
     logger.debug(f"{update.message.chat_id} checked the AL Central standings")
+
+
+async def live_scores(update, context):
+    """Get all currently live MLB games and their scores"""
+    try:
+        from datetime import timedelta
+        import requests
+        
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        base_url = "https://statsapi.mlb.com/api/v1"
+        
+        url = f"{base_url}/schedule"
+        params = {
+            "sportId": 1,
+            "startDate": yesterday.strftime("%Y-%m-%d"),
+            "endDate": today.strftime("%Y-%m-%d"),
+            "gameType": "R",
+            "hydrate": "linescore",
+        }
+        
+        resp = requests.get(url, params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        live_games = []
+        for date_entry in data.get("dates", []):
+            for game in date_entry.get("games", []):
+                status = game.get("status", {})
+                abstract = status.get("abstractGameState", "")
+                
+                # Only include live games (in progress)
+                if abstract != "Live":
+                    continue
+                    
+                teams = game.get("teams", {})
+                away_name = teams.get("away", {}).get("team", {}).get("name", "")
+                home_name = teams.get("home", {}).get("team", {}).get("name", "")
+                
+                linescore = game.get("linescore", {})
+                away_score = linescore.get("teams", {}).get("away", {}).get("runs", 0)
+                home_score = linescore.get("teams", {}).get("home", {}).get("runs", 0)
+                current_inning = linescore.get("currentInning", 0)
+                inning_half = linescore.get("inningHalf", "")
+                detailed_status = status.get("detailedState", "")
+                
+                # Fall back to schedule-level scores when linescore is absent
+                if away_score == 0:
+                    away_score = teams.get("away", {}).get("score", 0)
+                if home_score == 0:
+                    home_score = teams.get("home", {}).get("score", 0)
+                
+                live_games.append({
+                    "away_team": away_name,
+                    "home_team": home_name,
+                    "away_score": away_score,
+                    "home_score": home_score,
+                    "inning": current_inning,
+                    "inning_half": inning_half,
+                    "status": detailed_status
+                })
+        
+        if not live_games:
+            await context.bot.send_message(
+                chat_id=update.message.chat_id,
+                text="No live MLB games currently in progress.",
+                parse_mode="HTML"
+            )
+            return
+        
+        # Format the message
+        message = "<b>📺 Live MLB Games:</b>\n\n"
+        for game in live_games:
+            half_str = f" ({game['inning_half']})" if game['inning_half'] else ""
+            message += f"<b>{game['away_team']} {game['away_score']} @ {game['home_team']} {game['home_score']}</b>\n"
+            message += f"Inning: {game['inning']}{half_str} | {game['status']}\n\n"
+        
+        await context.bot.send_message(
+            chat_id=update.message.chat_id,
+            text=message,
+            parse_mode="HTML"
+        )
+        logger.debug(f"{update.message.chat_id} checked live MLB scores")
+        
+    except Exception as e:
+        logger.error(f"Error fetching live scores: {e}")
+        await context.bot.send_message(
+            chat_id=update.message.chat_id,
+            text="Sorry, I couldn't fetch live scores right now. Please try again later.",
+            parse_mode="HTML"
+        )

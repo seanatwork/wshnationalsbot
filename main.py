@@ -5,7 +5,7 @@ from mlbscores import (
     nats_schedule, mlb_scores,
     nlwest_standings, nleast_standings, nlcentral_standings,
     alwest_standings, aleast_standings, alcentral_standings,
-    get_past_games
+    get_past_games, live_scores
 )
 from leave_calculator import build_stats, fetch_live_game, should_leave, _completed_inning
 import os
@@ -85,6 +85,7 @@ def main():
     application.add_handler(CommandHandler("aleast", aleast_standings))
     application.add_handler(CommandHandler("alcentral", alcentral_standings))
     application.add_handler(CommandHandler("leave", leave_game))
+    application.add_handler(CommandHandler("scores", live_scores))
     
     # Set up daily job for posting yesterday's scores at 10 AM Central Time
     job_queue = application.job_queue
