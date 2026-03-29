@@ -68,6 +68,7 @@ TEAM_ALIASES: dict[str, str] = {
     "astros": "Houston Astros", "hou": "Houston Astros",
     # San Francisco
     "giants": "San Francisco Giants", "sfg": "San Francisco Giants",
+    "sf": "San Francisco Giants", "san francisco": "San Francisco Giants",
     # San Diego
     "padres": "San Diego Padres", "sdp": "San Diego Padres", "sd": "San Diego Padres",
     # Seattle
@@ -75,11 +76,11 @@ TEAM_ALIASES: dict[str, str] = {
     # Texas
     "rangers": "Texas Rangers", "tex": "Texas Rangers",
     # St. Louis
-    "cardinals": "St. Louis Cardinals", "cards": "St. Louis Cardinals", "stl": "St. Louis Cardinals",
+    "cardinals": "St. Louis Cardinals", "cards": "St. Louis Cardinals", "stl": "St. Louis Cardinals", "st louis": "St. Louis Cardinals",
     # Milwaukee
     "brewers": "Milwaukee Brewers", "mil": "Milwaukee Brewers",
     # Philadelphia
-    "phillies": "Philadelphia Phillies", "phi": "Philadelphia Phillies",
+    "phillies": "Philadelphia Phillies", "phi": "Philadelphia Phillies", "philly": "Philadelphia Phillies",
     # Pittsburgh
     "pirates": "Pittsburgh Pirates", "pit": "Pittsburgh Pirates",
     # Cincinnati
@@ -102,7 +103,7 @@ TEAM_ALIASES: dict[str, str] = {
     # Tampa Bay
     "rays": "Tampa Bay Rays", "tb": "Tampa Bay Rays", "tbr": "Tampa Bay Rays",
     # Oakland / Athletics (moved to Sacramento 2025)
-    "athletics": "Athletics", "a's": "Athletics", "oak": "Athletics", "sac": "Athletics",
+    "athletics": "Athletics", "a's": "Athletics", "as": "Athletics", "oak": "Athletics", "sac": "Athletics",
     # Cleveland
     "guardians": "Cleveland Guardians", "cle": "Cleveland Guardians",
     # Miami
@@ -223,12 +224,15 @@ def load_games(refresh: bool = False) -> list[dict]:
 def _team_matches(query: str, team_name: str) -> bool:
     """Return True if the query plausibly refers to team_name."""
     q = query.lower().strip()
-    # Direct alias lookup
+    team_lower = team_name.lower()
+    # Substring match first — catches "giants", "san francisco", city names, etc.
+    if q in team_lower:
+        return True
+    # Alias lookup for abbreviations like "sf", "nyy", "wsh"
     if q in TEAM_ALIASES:
         alias_target = TEAM_ALIASES[q].lower()
-        return alias_target == team_name.lower() or alias_target in team_name.lower()
-    # Substring match on full team name
-    return q in team_name.lower()
+        return alias_target == team_lower or alias_target in team_lower
+    return False
 
 
 def fetch_live_game(team_query: str) -> dict | None:
@@ -241,11 +245,14 @@ def fetch_live_game(team_query: str) -> dict | None:
         inning, inning_half, status, game_pk
     or None if no matching live game is found.
     """
-    today = date.today().strftime("%Y-%m-%d")
+    from datetime import timedelta
+    today = date.today()
+    yesterday = today - timedelta(days=1)
     url = f"{BASE_URL}/schedule"
     params = {
         "sportId": 1,
-        "date": today,
+        "startDate": yesterday.strftime("%Y-%m-%d"),
+        "endDate": today.strftime("%Y-%m-%d"),
         "gameType": "R",
         "hydrate": "linescore",
     }

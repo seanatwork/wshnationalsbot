@@ -43,6 +43,14 @@ async def leave_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text(f"{away} vs {home} has not started yet.")
         return
 
+    if status == "Game Over" or abstract == "Final":
+        await update.message.reply_text(
+            f"<b>{away} {away_score} @ {home} {home_score}</b>\n\n"
+            f"You're too late, the game is over! =P",
+            parse_mode="HTML"
+        )
+        return
+
     completed = _completed_inning(raw_inning, inning_half)
     result = should_leave(away_score, home_score, completed, _leave_stats)
 
