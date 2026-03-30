@@ -68,6 +68,9 @@ TELEGRAM_BOT_TOKEN=your_bot_token_here
 | `/alwest` | AL West standings |
 | `/aleast` | AL East standings |
 | `/alcentral` | AL Central standings |
+| `/scores` | Live MLB scores |
+| `/leave [team]` | Leave game calculator (optional team argument, defaults to "nationals") |
+| `/help` | Show this help message |
 
 ## Deployment
 

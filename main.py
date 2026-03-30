@@ -24,6 +24,24 @@ def _load_leave_stats() -> None:
     _leave_stats = build_stats()
     print("Leave calculator stats loaded.")
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    help_text = """
+<b>WSH Nationals Bot Commands:</b>
+
+/sch - Nationals upcoming schedule (next 4 days)
+/past - Last 3 Nationals game results
+/nlwest - NL West standings
+/nleast - NL East standings
+/nlcentral - NL Central standings
+/alwest - AL West standings
+/aleast - AL East standings
+/alcentral - AL Central standings
+/scores - Live MLB scores
+/leave [team] - Leave game calculator (optional team argument, defaults to "nationals")
+/help - Show this help message
+"""
+    await update.message.reply_text(help_text, parse_mode="HTML")
+
 async def leave_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     team = " ".join(context.args) if context.args else "nationals"
     game = fetch_live_game(team)
@@ -76,6 +94,7 @@ def main():
     threading.Thread(target=_load_leave_stats, daemon=True).start()
 
     # Add command handlers
+    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("sch", nats_schedule))
     application.add_handler(CommandHandler("past", get_past_games))
     application.add_handler(CommandHandler("nlwest", nlwest_standings))
