@@ -1,4 +1,6 @@
 import threading
+import asyncio
+import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from mlbscores import (
@@ -8,21 +10,37 @@ from mlbscores import (
     get_past_games, live_scores
 )
 from leave_calculator import build_stats, fetch_live_game, should_leave, _completed_inning
-import os
+from logger import setup_logger, get_logger
+from config import (
+    BOT_TOKEN, CHAT_ID, TIMEZONE, DAILY_POST_TIME,
+    NATIONALS_TEAM_ID, LEAVE_FP_RATE, validate_config
+)
 from datetime import time
 import pytz
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Setup logging
+setup_logger(logging.INFO)
+logger = get_logger(__name__)
 
 # Loaded once at startup in a background thread
 _leave_stats: dict | None = None
+_leave_stats_lock = threading.Lock()
+_leave_stats_ready = threading.Event()
+
 
 def _load_leave_stats() -> None:
+    """Load leave calculator stats in background thread."""
     global _leave_stats
-    _leave_stats = build_stats()
-    print("Leave calculator stats loaded.")
+    try:
+        _leave_stats = build_stats()
+        logger.info("Leave calculator stats loaded.")
+    finally:
+        _leave_stats_ready.set()
+
+
+def _wait_for_stats() -> bool:
+    """Wait for stats to be loaded (timeout 30s)."""
+    return _leave_stats_ready.wait(timeout=30)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     help_text = """
@@ -43,6 +61,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(help_text, parse_mode="HTML")
 
 async def leave_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /leave command - decide if user should leave the game."""
+    # Wait for stats to load
+    if not _wait_for_stats():
+        await update.message.reply_text(
+            "Stats are still loading. Please try again in a moment."
+        )
+        return
+
     team = " ".join(context.args) if context.args else "nationals"
     game = fetch_live_game(team)
 
@@ -84,12 +110,14 @@ async def leave_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.message.reply_text(msg, parse_mode="HTML")
 
 def main():
-    # Your bot token here
-    TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-    
+    """Initialize and run the bot."""
+    # Validate configuration
+    validate_config()
+    logger.info("Configuration validated successfully")
+
     # Create application
-    application = Application.builder().token(TOKEN).build()
-    
+    application = Application.builder().token(BOT_TOKEN).build()
+
     # Load leave-calculator stats in the background while the bot starts up
     threading.Thread(target=_load_leave_stats, daemon=True).start()
 
@@ -105,17 +133,24 @@ def main():
     application.add_handler(CommandHandler("alcentral", alcentral_standings))
     application.add_handler(CommandHandler("leave", leave_game))
     application.add_handler(CommandHandler("scores", live_scores))
-    
-    # Set up daily job for posting yesterday's scores at 10 AM Central Time
+
+    # Set up daily job for posting yesterday's scores
     job_queue = application.job_queue
     if job_queue:
-        print("Job queue initialized successfully")
-        job = job_queue.run_daily(mlb_scores, time=time(10, 0, tzinfo=pytz.timezone('America/Chicago')))
-        print(f"Daily job scheduled: {job}")
+        # Parse time from config (format: "HH:MM")
+        hour, minute = map(int, DAILY_POST_TIME.split(':'))
+        tz = pytz.timezone(TIMEZONE)
+        logger.info("Job queue initialized successfully")
+        job = job_queue.run_daily(
+            mlb_scores,
+            time=time(hour, minute, tzinfo=tz)
+        )
+        logger.info(f"Daily job scheduled: {job}")
     else:
-        print("Failed to initialize job queue")
-    
+        logger.error("Failed to initialize job queue")
+
     # Start bot
+    logger.info("Starting bot polling...")
     application.run_polling()
 
 if __name__ == '__main__':

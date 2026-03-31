@@ -13,13 +13,15 @@ A Telegram bot that provides Washington Nationals MLB information including sche
   - `/alwest` - AL West standings
   - `/aleast` - AL East standings
   - `/alcentral` - AL Central standings
-- **Automated Daily Posting** - Posts yesterday's Nationals scores at 10 AM Central Time
+- **Live Scores** - All live MLB games (`/scores`)
+- **Leave Calculator** - FiveThirtyEight-inspired "when to leave" calculator (`/leave [team]`)
+- **Automated Daily Posting** - Posts yesterday's Nationals scores at configurable time
 
 ## Setup
 
 ### Prerequisites
 
-- Python 3.7+
+- Python 3.10+
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
 
 ### Installation
@@ -38,21 +40,25 @@ A Telegram bot that provides Washington Nationals MLB information including sche
 3. **Set up environment variables**
    ```bash
    cp .env.example .env
-   # Edit .env with your bot token
+   # Edit .env with your bot token and other settings
    ```
 
 4. **Run the bot**
    ```bash
-   python main.py
+   python run.py
    ```
 
 ## Environment Variables
 
-Create a `.env` file with:
-
-```env
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `TELEGRAM_BOT_TOKEN` | Your bot token from BotFather | **Required** |
+| `CHAT_ID` | Chat ID for automated daily scores | `@natsdc` |
+| `TIMEZONE` | Timezone for scheduling | `America/Chicago` |
+| `DAILY_POST_TIME` | Daily post time (HH:MM format) | `10:00` |
+| `LEAVE_FP_RATE` | Leave calculator false-positive tolerance | `0.05` |
+| `HEALTHCHECK_PORT` | Health check server port | `8000` |
+| `HEALTHCHECK_HOST` | Health check server host | `0.0.0.0` |
 
 ⚠️ **Important:** Never commit your `.env` file to version control!
 
@@ -100,11 +106,16 @@ This bot uses the [MLB Stats API](https://www.mlb.com/api-docs/) via the [MLB-St
 ```
 wshnationalsbot/
 ├── main.py              # Bot entry point and command handlers
-├── mlbscores.py         # MLB API integration and formatting
-├── logger.py            # Logging configuration
+├── run.py               # Production runner with healthcheck
+├── mlbscores.py         # MLB API integration and command handlers
+├── leave_calculator.py  # FiveThirtyEight-inspired leave calculator
+├── config.py            # Centralized configuration
+├── logger.py            # Logging setup
 ├── requirements.txt     # Python dependencies
 ├── .env.example         # Environment variables template
-└── README.md           # This file
+├── Dockerfile           # Docker build configuration
+├── fly.toml             # Fly.io deployment config
+└── README.md            # This file
 ```
 
 ## Contributing
