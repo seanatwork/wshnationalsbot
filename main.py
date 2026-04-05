@@ -7,8 +7,9 @@ from mlbscores import (
     nats_schedule, mlb_scores,
     nlwest_standings, nleast_standings, nlcentral_standings,
     alwest_standings, aleast_standings, alcentral_standings,
-    get_past_games, live_scores
+    get_past_games, live_scores, _format_standings
 )
+from stats import get_abs_challenge_stats
 from leave_calculator import build_stats, fetch_live_game, should_leave, _completed_inning
 from logger import setup_logger, get_logger
 from config import (
@@ -169,6 +170,32 @@ async def standings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         logger.debug(f"User checked the {division_name} standings")
 
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /stats command - show statistics menu."""
+    keyboard = [
+        [InlineKeyboardButton("ABS Challenge Success Rate", callback_data="stats_abs")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "<b>Select a statistic to view:</b>",
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
+
+async def stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle stats selection from menu."""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "stats_abs":
+        stats_text = await get_abs_challenge_stats()
+        await query.edit_message_text(
+            text=stats_text,
+            parse_mode="HTML"
+        )
+        logger.debug("User checked ABS challenge stats")
+
 _BOT_COMMANDS = [
     BotCommand("start", "Welcome message and getting started"),
     BotCommand("sch", "Nationals upcoming schedule"),
@@ -176,6 +203,7 @@ _BOT_COMMANDS = [
     BotCommand("scores", "Live MLB scores"),
     BotCommand("leave", "Should you leave? (e.g. /leave nationals)"),
     BotCommand("standings", "MLB division standings"),
+    BotCommand("stats", "Advanced statistics"),
     BotCommand("help", "Show all commands"),
 ]
 
@@ -204,11 +232,13 @@ def main():
     application.add_handler(CommandHandler("sch", nats_schedule))
     application.add_handler(CommandHandler("past", get_past_games))
     application.add_handler(CommandHandler("standings", standings_command))
+    application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("leave", leave_game))
     application.add_handler(CommandHandler("scores", live_scores))
     
-    # Add callback handler for standings buttons
+    # Add callback handlers
     application.add_handler(CallbackQueryHandler(standings_callback, pattern="^standings_"))
+    application.add_handler(CallbackQueryHandler(stats_callback, pattern="^stats_"))
 
     # Set up daily job for posting yesterday's scores
     job_queue = application.job_queue
