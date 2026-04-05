@@ -78,7 +78,7 @@ def game_summary_short(game: dict) -> str:
     return (
         f"<b>{game['winning_team']} win</b>\n"
         f"{game['summary']}\n"
-        f"<i>Series: {game['series_status']}</i>\n"
+        f"<i>Series: {game['series_status']}</i>\n\n"
     )
 
 
@@ -169,7 +169,11 @@ def get_past_games_scores(team_id: int) -> Optional[str]:
     message = ""
     games_found = 0
 
-    for days_ago in range(1, 4):
+    # Search up to 7 days back to find 3 games
+    for days_ago in range(1, 8):
+        if games_found >= 3:
+            break
+            
         game_date = date.today() - timedelta(days=days_ago)
         sched = statsapi.schedule(team=team_id, date=game_date)
 
@@ -180,8 +184,10 @@ def get_past_games_scores(team_id: int) -> Optional[str]:
                     message += f"<b>{date_str}:</b>\n"
                     message += game_summary_short(game)
                     games_found += 1
+                else:
+                    break
 
-    result = f"<b>Past 3 Nationals Games:</b>\n\n{message}" if message else None
+    result = f"<b>Past {games_found} Nationals Games:</b>\n\n{message}" if message else None
     _set_cached(cache_key, result)
     return result
 
