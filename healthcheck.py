@@ -11,7 +11,7 @@ def health():
 
 def start_healthcheck() -> None:
     """Start the Flask healthcheck server."""
-    app.run(host=HEALTHCHECK_HOST, port=HEALTHCHECK_PORT)
+    app.run(host=HEALTHCHECK_HOST, port=HEALTHCHECK_PORT, threaded=True)
 
 
 if __name__ == '__main__':
