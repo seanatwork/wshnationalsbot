@@ -10,6 +10,7 @@ from mlbscores import (
     get_past_games, live_scores, _format_standings
 )
 from stats import get_abs_challenge_stats
+from highlights import get_nationals_highlights
 from leave_calculator import build_stats, fetch_live_game, should_leave, _completed_inning
 from logger import setup_logger, get_logger
 from config import (
@@ -196,10 +197,21 @@ async def stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         logger.debug("User checked ABS challenge stats")
 
+async def highlights_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /highlights command - show recent Nationals video highlights."""
+    highlights_text = await get_nationals_highlights()
+    await update.message.reply_text(
+        highlights_text,
+        parse_mode="HTML",
+        disable_web_page_preview=False
+    )
+    logger.debug("User requested Nationals highlights")
+
 _BOT_COMMANDS = [
     BotCommand("start", "Welcome message and getting started"),
     BotCommand("sch", "Nationals upcoming schedule"),
     BotCommand("past", "Last 3 Nationals game results"),
+    BotCommand("highlights", "Recent Nationals video highlights"),
     BotCommand("scores", "Live MLB scores"),
     BotCommand("leave", "Should you leave? (e.g. /leave nationals)"),
     BotCommand("standings", "MLB division standings"),
@@ -231,6 +243,7 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("sch", nats_schedule))
     application.add_handler(CommandHandler("past", get_past_games))
+    application.add_handler(CommandHandler("highlights", highlights_command))
     application.add_handler(CommandHandler("standings", standings_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("leave", leave_game))

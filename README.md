@@ -8,6 +8,7 @@ A Telegram bot that provides Washington Nationals MLB information including sche
 - **Past Games** - View last 3 Nationals game results (`/past`)
 - **Standings** - All MLB division standings (`/standings`)
 - **Statistics** - Advanced MLB statistics (`/stats`)
+- **Highlights** - Recent Nationals video highlights (`/highlights`)
 - **Live Scores** - All live MLB games (`/scores`)
 - **Leave Calculator** - FiveThirtyEight-inspired "when to leave" calculator (`/leave [team]`)
 - **Automated Daily Posting** - Posts yesterday's Nationals scores at configurable time
@@ -66,6 +67,7 @@ A Telegram bot that provides Washington Nationals MLB information including sche
 | `/past` | Last 3 Nationals game results |
 | `/standings` | MLB division standings (interactive menu) |
 | `/stats` | Advanced MLB statistics (ABS challenges) |
+| `/highlights` | Recent Nationals video highlights |
 | `/scores` | Live MLB scores |
 | `/leave [team]` | Leave game calculator (optional team argument, defaults to "nationals") |
 | `/help` | Show this help message |
@@ -101,6 +103,8 @@ wshnationalsbot/
 ├── main.py              # Bot entry point and command handlers
 ├── run.py               # Production runner with healthcheck
 ├── mlbscores.py         # MLB API integration and command handlers
+├── stats.py             # Advanced statistics (ABS challenges)
+├── highlights.py        # MLB.com video highlights
 ├── leave_calculator.py  # FiveThirtyEight-inspired leave calculator
 ├── config.py            # Centralized configuration
 ├── logger.py            # Logging setup
