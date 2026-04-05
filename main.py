@@ -1,8 +1,8 @@
 import threading
 import asyncio
 import logging
-from telegram import Update, BotCommand
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from mlbscores import (
     nats_schedule, mlb_scores,
     nlwest_standings, nleast_standings, nlcentral_standings,
@@ -42,18 +42,31 @@ def _wait_for_stats() -> bool:
     """Wait for stats to be loaded (timeout 30s)."""
     return _leave_stats_ready.wait(timeout=30)
 
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /start command - welcome message."""
+    welcome_text = """
+<b>Welcome to WSH Nationals Bot! 🏟️</b>
+
+Get Washington Nationals MLB information including schedules, standings, and recent game results.
+
+<b>Quick Start:</b>
+/sch - Nationals upcoming schedule
+/past - Last 3 Nationals game results
+/standings - All MLB division standings
+/scores - Live MLB games
+/leave - Should you leave the game?
+
+/help - See all commands
+"""
+    await update.message.reply_text(welcome_text, parse_mode="HTML", disable_web_page_preview=True)
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     help_text = """
 <b>WSH Nationals Bot Commands:</b>
 
 /sch - Nationals upcoming schedule (next 4 days)
 /past - Last 3 Nationals game results
-/nlwest - NL West standings
-/nleast - NL East standings
-/nlcentral - NL Central standings
-/alwest - AL West standings
-/aleast - AL East standings
-/alcentral - AL Central standings
+/standings - All MLB division standings
 /scores - Live MLB scores
 /leave [team] - Leave game calculator (optional team argument, defaults to "nationals")
 /help - Show this help message
@@ -111,18 +124,59 @@ async def leave_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
     await update.message.reply_text(msg, parse_mode="HTML")
 
+async def standings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /standings command - show division selection buttons."""
+    keyboard = [
+        [
+            InlineKeyboardButton("NL West", callback_data="standings_nlwest"),
+            InlineKeyboardButton("NL East", callback_data="standings_nleast"),
+            InlineKeyboardButton("NL Central", callback_data="standings_nlcentral")
+        ],
+        [
+            InlineKeyboardButton("AL West", callback_data="standings_alwest"),
+            InlineKeyboardButton("AL East", callback_data="standings_aleast"),
+            InlineKeyboardButton("AL Central", callback_data="standings_alcentral")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "<b>Select a division for standings:</b>",
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
+
+async def standings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle division selection from standings menu."""
+    query = update.callback_query
+    await query.answer()
+    
+    division_map = {
+        "standings_nlwest": ("nlw", "NL West"),
+        "standings_nleast": ("nle", "NL East"),
+        "standings_nlcentral": ("nlc", "NL Central"),
+        "standings_alwest": ("alw", "AL West"),
+        "standings_aleast": ("ale", "AL East"),
+        "standings_alcentral": ("alc", "AL Central")
+    }
+    
+    division_code, division_name = division_map.get(query.data, ("", ""))
+    if division_code:
+        standings_text = await asyncio.to_thread(_format_standings, division_code)
+        await query.edit_message_text(
+            text=standings_text,
+            parse_mode="HTML"
+        )
+        logger.debug(f"User checked the {division_name} standings")
+
 _BOT_COMMANDS = [
-    BotCommand("sch",       "Nationals upcoming schedule"),
-    BotCommand("past",      "Last 3 Nationals game results"),
-    BotCommand("scores",    "Live MLB scores"),
-    BotCommand("leave",     "Should you leave? (e.g. /leave nationals)"),
-    BotCommand("nleast",    "NL East standings"),
-    BotCommand("nlwest",    "NL West standings"),
-    BotCommand("nlcentral", "NL Central standings"),
-    BotCommand("aleast",    "AL East standings"),
-    BotCommand("alwest",    "AL West standings"),
-    BotCommand("alcentral", "AL Central standings"),
-    BotCommand("help",      "Show all commands"),
+    BotCommand("start", "Welcome message and getting started"),
+    BotCommand("sch", "Nationals upcoming schedule"),
+    BotCommand("past", "Last 3 Nationals game results"),
+    BotCommand("scores", "Live MLB scores"),
+    BotCommand("leave", "Should you leave? (e.g. /leave nationals)"),
+    BotCommand("standings", "MLB division standings"),
+    BotCommand("help", "Show all commands"),
 ]
 
 
@@ -145,17 +199,16 @@ def main():
     threading.Thread(target=_load_leave_stats, daemon=True).start()
 
     # Add command handlers
+    application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("sch", nats_schedule))
     application.add_handler(CommandHandler("past", get_past_games))
-    application.add_handler(CommandHandler("nlwest", nlwest_standings))
-    application.add_handler(CommandHandler("nleast", nleast_standings))
-    application.add_handler(CommandHandler("nlcentral", nlcentral_standings))
-    application.add_handler(CommandHandler("alwest", alwest_standings))
-    application.add_handler(CommandHandler("aleast", aleast_standings))
-    application.add_handler(CommandHandler("alcentral", alcentral_standings))
+    application.add_handler(CommandHandler("standings", standings_command))
     application.add_handler(CommandHandler("leave", leave_game))
     application.add_handler(CommandHandler("scores", live_scores))
+    
+    # Add callback handler for standings buttons
+    application.add_handler(CallbackQueryHandler(standings_callback, pattern="^standings_"))
 
     # Set up daily job for posting yesterday's scores
     job_queue = application.job_queue

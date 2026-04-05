@@ -6,13 +6,7 @@ A Telegram bot that provides Washington Nationals MLB information including sche
 
 - **Schedule** - Get upcoming Nationals games (`/sch`)
 - **Past Games** - View last 3 Nationals game results (`/past`)
-- **Standings** - All MLB division standings
-  - `/nlwest` - NL West standings
-  - `/nleast` - NL East standings
-  - `/nlcentral` - NL Central standings
-  - `/alwest` - AL West standings
-  - `/aleast` - AL East standings
-  - `/alcentral` - AL Central standings
+- **Standings** - All MLB division standings (`/standings`)
 - **Live Scores** - All live MLB games (`/scores`)
 - **Leave Calculator** - FiveThirtyEight-inspired "when to leave" calculator (`/leave [team]`)
 - **Automated Daily Posting** - Posts yesterday's Nationals scores at configurable time
@@ -66,14 +60,10 @@ A Telegram bot that provides Washington Nationals MLB information including sche
 
 | Command | Description |
 |---------|-------------|
+| `/start` | Welcome message and getting started |
 | `/sch` | Nationals upcoming schedule (next 4 days) |
 | `/past` | Last 3 Nationals game results |
-| `/nlwest` | NL West standings |
-| `/nleast` | NL East standings |
-| `/nlcentral` | NL Central standings |
-| `/alwest` | AL West standings |
-| `/aleast` | AL East standings |
-| `/alcentral` | AL Central standings |
+| `/standings` | MLB division standings (interactive menu) |
 | `/scores` | Live MLB scores |
 | `/leave [team]` | Leave game calculator (optional team argument, defaults to "nationals") |
 | `/help` | Show this help message |

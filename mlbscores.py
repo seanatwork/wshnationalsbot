@@ -223,12 +223,21 @@ def _format_standings(division_code: str) -> str:
 
     for div in standings_data.values():
         output_lines.append(f"<b>{div['div_name']}</b>")
+        output_lines.append("")  # Empty line after division title
+        
         for i, team in enumerate(div['teams'], start=1):
             gb = team['gb'] if team['gb'] not in ('', '-', None) else '—'
+            # Mobile-friendly format with better spacing
+            team_name = team['name']
+            # Truncate long team names for mobile
+            if len(team_name) > 12:
+                team_name = team_name[:10] + "..."
+            
             output_lines.append(
-                f"{i}. {team['name']}  <b>{team['w']}-{team['l']}</b>  GB: {gb}"
+                f"{i}. <b>{team_name}</b>\n"
+                f"   <code>{team['w']}-{team['l']}</code>  GB: {gb}"
             )
-        output_lines.append("")
+        output_lines.append("")  # Empty line after teams
 
     result = "\n".join(output_lines).rstrip()
     _set_cached(cache_key, result)
