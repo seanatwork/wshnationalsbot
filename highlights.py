@@ -1,10 +1,9 @@
-"""MLB.com video highlights scraper."""
+"""MLB.com video highlights using MLB Stats API."""
 import asyncio
 import time
 import requests
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional, List, Dict
-from bs4 import BeautifulSoup
 
 from logger import get_logger
 from config import NATIONALS_TEAM_ID
@@ -33,75 +32,78 @@ async def get_nationals_highlights() -> Optional[str]:
         return cached
     
     try:
-        # MLB.com video search URL for Nationals
-        url = "https://www.mlb.com/video"
-        params = {
-            "q": "washington nationals",
-            "sort": "date"
-        }
+        highlights = []
         
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        # Try to get highlights from recent games
+        base_url = "https://statsapi.mlb.com/api/v1"
+        
+        # First, get recent Nationals games
+        today = date.today()
+        last_week = today - timedelta(days=7)
+        
+        schedule_params = {
+            "sportId": 1,
+            "teamId": NATIONALS_TEAM_ID,
+            "startDate": last_week.strftime("%Y-%m-%d"),
+            "endDate": today.strftime("%Y-%m-%d"),
+            "gameType": "R",
+            "fields": "dates,games,gamePk,gameDate,status,abstractGameState,teams,home,away,team,name"
         }
         
         resp = await asyncio.to_thread(
-            requests.get, url, params=params, headers=headers, timeout=15
+            requests.get, f"{base_url}/schedule", params=schedule_params, timeout=15
         )
         resp.raise_for_status()
+        schedule_data = resp.json()
         
-        soup = BeautifulSoup(resp.text, 'html.parser')
+        # Get game IDs for completed games
+        game_ids = []
+        for date_entry in schedule_data.get('dates', []):
+            for game in date_entry.get('games', []):
+                status = game.get('status', {})
+                if status.get('abstractGameState') in ['Final', 'Live']:
+                    game_ids.append(game.get('gamePk'))
         
-        highlights = []
-        
-        # Find video cards/containers
-        video_elements = soup.find_all('a', href=True)
-        
-        for element in video_elements:
-            href = element.get('href', '')
-            # Look for video links
-            if '/video/' in href or 'watch' in href:
-                # Get title
-                title_elem = element.find('h3') or element.find('h2') or element.find('span', class_='title')
-                title = title_elem.get_text(strip=True) if title_elem else None
+        # Fetch highlights for each game
+        for game_id in game_ids[:3]:
+            if len(highlights) >= 3:
+                break
                 
-                # Get description from alt text or nearby elements
-                if not title:
-                    img = element.find('img')
-                    if img:
-                        title = img.get('alt', '')
+            try:
+                content_url = f"{base_url}/game/{game_id}/content"
+                content_resp = await asyncio.to_thread(
+                    requests.get, content_url, timeout=10
+                )
+                content_resp.raise_for_status()
+                content_data = content_resp.json()
                 
-                if title and 'nationals' in title.lower():
-                    # Build full URL
-                    video_url = href if href.startswith('http') else f"https://www.mlb.com{href}"
-                    highlights.append({
-                        'title': title,
-                        'url': video_url
-                    })
+                # Get highlights from game content
+                for highlight in content_data.get('highlights', {}).get('live', {}).get('items', [])[:3]:
+                    title = highlight.get('headline', highlight.get('title', 'Highlight'))
+                    video_urls = highlight.get('playbacks', [])
                     
+                    # Find the best quality MP4 URL
+                    video_url = None
+                    for playback in video_urls:
+                        if playback.get('name') == 'mp4Avc':
+                            video_url = playback.get('url')
+                            break
+                    
+                    if not video_url and video_urls:
+                        video_url = video_urls[0].get('url')
+                    
+                    if title and video_url:
+                        highlights.append({
+                            'title': title,
+                            'url': video_url
+                        })
+                        
                     if len(highlights) >= 3:
                         break
-        
-        if not highlights:
-            # Try alternative approach with MLB Stats API video endpoint
-            base_url = "https://statsapi.mlb.com/api/v1"
-            video_params = {
-                "sportId": 1,
-                "teamId": NATIONALS_TEAM_ID,
-                "limit": 3,
-                "sortBy": "date"
-            }
-            
-            resp = await asyncio.to_thread(
-                requests.get, f"{base_url}/video", params=video_params, timeout=15
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            
-            for video in data.get('videos', [])[:3]:
-                highlights.append({
-                    'title': video.get('title', 'Highlight'),
-                    'url': video.get('url', f"https://www.mlb.com/video/{video.get('slug', '')}")
-                })
+                        
+            except Exception as e:
+                logger.debug(f"Error fetching highlights for game {game_id}: {e}")
+                continue
         
         if not highlights:
             return "No recent Washington Nationals highlights found."
@@ -109,8 +111,8 @@ async def get_nationals_highlights() -> Optional[str]:
         # Format message
         message_lines = ["<b>📺 Recent Washington Nationals Highlights</b>", ""]
         
-        for i, highlight in enumerate(highlights, start=1):
-            title = highlight['title'][:60] + "..." if len(highlight['title']) > 60 else highlight['title']
+        for i, highlight in enumerate(highlights[:3], start=1):
+            title = highlight['title'][:70] + "..." if len(highlight['title']) > 70 else highlight['title']
             message_lines.append(f"{i}. <a href=\"{highlight['url']}\">{title}</a>")
         
         result = "\n\n".join(message_lines)
