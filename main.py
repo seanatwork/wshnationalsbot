@@ -104,6 +104,25 @@ async def leave_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text(f"{away} vs {home} has not started yet.")
         return
 
+    # Check for rain delays and postponements
+    status_lower = status.lower() if status else ""
+    if "postponed" in status_lower:
+        await update.message.reply_text(
+            f"<b>{away} vs {home}</b>\n\n"
+            f"Game has been postponed.",
+            parse_mode="HTML"
+        )
+        return
+    
+    if "delay" in status_lower or "suspended" in status_lower:
+        await update.message.reply_text(
+            f"<b>{away} {away_score} @ {home} {home_score}</b>\n"
+            f"Inning: {raw_inning}{half_str} | {status}\n\n"
+            f"Game is currently delayed. Check back later!",
+            parse_mode="HTML"
+        )
+        return
+
     if status == "Game Over" or abstract == "Final":
         await update.message.reply_text(
             f"<b>{away} {away_score} @ {home} {home_score}</b>\n\n"
