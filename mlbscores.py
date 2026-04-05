@@ -1,5 +1,6 @@
 """MLB API integration and command handlers."""
 import asyncio
+import time
 import statsapi
 import pytz
 import requests
@@ -10,6 +11,31 @@ from logger import get_logger
 from config import CHAT_ID, NATIONALS_TEAM_ID, TIMEZONE
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Simple TTL cache
+# ---------------------------------------------------------------------------
+
+_cache: dict[str, tuple[float, object]] = {}
+
+
+def _get_cached(key: str, ttl: float):
+    """Return cached value if still fresh, else None."""
+    entry = _cache.get(key)
+    if entry and (time.monotonic() - entry[0]) < ttl:
+        return entry[1]
+    return None
+
+
+def _set_cached(key: str, value) -> None:
+    _cache[key] = (time.monotonic(), value)
+
+
+# Cache TTLs in seconds
+_TTL_STANDINGS = 300   # 5 minutes
+_TTL_SCHEDULE = 300    # 5 minutes
+_TTL_PAST = 300        # 5 minutes
+_TTL_LIVE = 30         # 30 seconds
 
 # Division codes mapping
 DIVISIONS = {
@@ -59,6 +85,10 @@ def game_summary_short(game: dict) -> str:
 def get_yesterday_scores(team_id: int) -> Optional[str]:
     """Get yesterday's game scores for a team."""
     yesterday = date.today() - timedelta(days=1)
+    cache_key = f"yesterday_{team_id}_{yesterday}"
+    cached = _get_cached(cache_key, _TTL_PAST)
+    if cached is not None:
+        return cached
     sched = statsapi.schedule(team=team_id, date=yesterday)
     if len(sched) == 0:
         logger.info('No game yesterday')
@@ -66,6 +96,7 @@ def get_yesterday_scores(team_id: int) -> Optional[str]:
     message = ""
     for game in sched:
         message += game_summary(game)
+    _set_cached(cache_key, message)
     return message
 
 
@@ -88,6 +119,10 @@ def mlb_scores(context) -> None:
 def schedule(team_id: int, user_timezone: str) -> str:
     """Get upcoming schedule for a team."""
     start = date.today()
+    cache_key = f"schedule_{team_id}_{start}"
+    cached = _get_cached(cache_key, _TTL_SCHEDULE)
+    if cached is not None:
+        return cached
     end = start + timedelta(days=7)
     sched = statsapi.schedule(team=team_id, start_date=start, end_date=end)
     if not sched:
@@ -95,6 +130,7 @@ def schedule(team_id: int, user_timezone: str) -> str:
     message = ""
     for game in sched:
         message += format_upcoming_game(game, user_timezone)
+    _set_cached(cache_key, message)
     return message
 
 
@@ -125,6 +161,11 @@ def format_upcoming_game(game: dict, user_timezone: str) -> str:
 
 def get_past_games_scores(team_id: int) -> Optional[str]:
     """Get the last 3 completed games for a team."""
+    cache_key = f"past_{team_id}_{date.today()}"
+    cached = _get_cached(cache_key, _TTL_PAST)
+    if cached is not None:
+        return cached
+
     message = ""
     games_found = 0
 
@@ -140,9 +181,9 @@ def get_past_games_scores(team_id: int) -> Optional[str]:
                     message += game_summary_short(game)
                     games_found += 1
 
-    if not message:
-        return None
-    return f"<b>Past 3 Nationals Games:</b>\n\n{message}"
+    result = f"<b>Past 3 Nationals Games:</b>\n\n{message}" if message else None
+    _set_cached(cache_key, result)
+    return result
 
 
 async def get_past_games(update, context) -> None:
@@ -158,7 +199,7 @@ async def get_past_games(update, context) -> None:
             chat_id=update.message.chat_id,
             text="No recent games found for the Nationals.",
             parse_mode="HTML")
-    logger.debug(f"{update.message.chat_id} checked the past Nationals games")
+    logger.debug("User checked the past Nationals games")
 
 
 async def nats_schedule(update, context) -> None:
@@ -168,23 +209,30 @@ async def nats_schedule(update, context) -> None:
         chat_id=update.message.chat_id,
         text=message,
         parse_mode="HTML")
-    logger.debug(f"{update.message.chat_id} checked the Nationals schedule")
+    logger.debug("User checked the Nationals schedule")
 
 
 def _format_standings(division_code: str) -> str:
     """Fetch and format standings for a division."""
+    cache_key = f"standings_{division_code}_{date.today()}"
+    cached = _get_cached(cache_key, _TTL_STANDINGS)
+    if cached is not None:
+        return cached
     standings_data = statsapi.standings_data(division=division_code, include_wildcard=False)
     output_lines = []
 
     for div in standings_data.values():
-        output_lines.append(div['div_name'])
-        output_lines.append(f"{'Team':<25} {'W':>3} {'L':>3} {'GB':>4}")
-        for team in div['teams']:
-            team_name = team['name'][:25]
-            output_lines.append(f"{team_name:<25} {team['w']:>3} {team['l']:>3} {team['gb']:>4}")
+        output_lines.append(f"<b>{div['div_name']}</b>")
+        for i, team in enumerate(div['teams'], start=1):
+            gb = team['gb'] if team['gb'] not in ('', '-', None) else '—'
+            output_lines.append(
+                f"{i}. {team['name']}  <b>{team['w']}-{team['l']}</b>  GB: {gb}"
+            )
         output_lines.append("")
 
-    return "<code>" + "\n".join(output_lines) + "</code>"
+    result = "\n".join(output_lines).rstrip()
+    _set_cached(cache_key, result)
+    return result
 
 
 async def _division_standings(
@@ -199,7 +247,7 @@ async def _division_standings(
         chat_id=update.message.chat_id,
         text=standings_text,
         parse_mode="HTML")
-    logger.debug(f"{update.message.chat_id} checked the {division_name} standings")
+    logger.debug(f"User checked the {division_name} standings")
 
 
 # Division-specific handlers
@@ -233,6 +281,17 @@ async def live_scores(update, context) -> None:
         today = date.today()
         yesterday = today - timedelta(days=1)
         base_url = "https://statsapi.mlb.com/api/v1"
+
+        cache_key = f"live_scores_{today}"
+        cached_msg = _get_cached(cache_key, _TTL_LIVE)
+        if cached_msg is not None:
+            await context.bot.send_message(
+                chat_id=update.message.chat_id,
+                text=cached_msg,
+                parse_mode="HTML"
+            )
+            logger.debug("User checked live MLB scores (cached)")
+            return
 
         url = f"{base_url}/schedule"
         params = {
@@ -285,9 +344,10 @@ async def live_scores(update, context) -> None:
                 })
 
         if not live_games:
+            no_games_msg = "No live MLB games currently in progress."
             await context.bot.send_message(
                 chat_id=update.message.chat_id,
-                text="No live MLB games currently in progress.",
+                text=no_games_msg,
                 parse_mode="HTML"
             )
             return
@@ -301,12 +361,13 @@ async def live_scores(update, context) -> None:
                 f"Inning: {game['inning']}{half_str} | {game['status']}\n\n"
             )
 
+        _set_cached(cache_key, message)
         await context.bot.send_message(
             chat_id=update.message.chat_id,
             text=message,
             parse_mode="HTML"
         )
-        logger.debug(f"{update.message.chat_id} checked live MLB scores")
+        logger.debug("User checked live MLB scores")
 
     except Exception as e:
         logger.error(f"Error fetching live scores: {e}")

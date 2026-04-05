@@ -1,7 +1,7 @@
 import threading
 import asyncio
 import logging
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, ContextTypes
 from mlbscores import (
     nats_schedule, mlb_scores,
@@ -57,8 +57,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 /scores - Live MLB scores
 /leave [team] - Leave game calculator (optional team argument, defaults to "nationals")
 /help - Show this help message
+
+<i>Privacy: This bot does not store personal data. Game data is sourced from the public MLB Stats API. By using this bot you agree to <a href="https://telegram.org/privacy-tpa">Telegram's Privacy Policy for Third-Party Bots</a>.</i>
 """
-    await update.message.reply_text(help_text, parse_mode="HTML")
+    await update.message.reply_text(help_text, parse_mode="HTML", disable_web_page_preview=True)
 
 async def leave_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /leave command - decide if user should leave the game."""
@@ -109,6 +111,27 @@ async def leave_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
     await update.message.reply_text(msg, parse_mode="HTML")
 
+_BOT_COMMANDS = [
+    BotCommand("sch",       "Nationals upcoming schedule"),
+    BotCommand("past",      "Last 3 Nationals game results"),
+    BotCommand("scores",    "Live MLB scores"),
+    BotCommand("leave",     "Should you leave? (e.g. /leave nationals)"),
+    BotCommand("nleast",    "NL East standings"),
+    BotCommand("nlwest",    "NL West standings"),
+    BotCommand("nlcentral", "NL Central standings"),
+    BotCommand("aleast",    "AL East standings"),
+    BotCommand("alwest",    "AL West standings"),
+    BotCommand("alcentral", "AL Central standings"),
+    BotCommand("help",      "Show all commands"),
+]
+
+
+async def _post_init(application: Application) -> None:
+    """Register bot commands so Telegram shows the menu button."""
+    await application.bot.set_my_commands(_BOT_COMMANDS)
+    logger.info("Bot commands registered")
+
+
 def main():
     """Initialize and run the bot."""
     # Validate configuration
@@ -116,7 +139,7 @@ def main():
     logger.info("Configuration validated successfully")
 
     # Create application
-    application = Application.builder().token(BOT_TOKEN).build()
+    application = Application.builder().token(BOT_TOKEN).post_init(_post_init).build()
 
     # Load leave-calculator stats in the background while the bot starts up
     threading.Thread(target=_load_leave_stats, daemon=True).start()

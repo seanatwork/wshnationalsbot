@@ -42,9 +42,6 @@ Thumbs.db
 
 # Logs
 *.log
-
-# Railway
-railway.toml
 .env
 
 # Cache files

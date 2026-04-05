@@ -80,12 +80,13 @@ A Telegram bot that provides Washington Nationals MLB information including sche
 
 ## Deployment
 
-### Railway
+### Fly.io
 
-1. Connect your GitHub repository to Railway
-2. Set environment variable in Railway dashboard:
-   - `TELEGRAM_BOT_TOKEN=your_bot_token_here`
-3. Deploy!
+See `fly.toml` for configuration. Deploy with:
+
+```bash
+fly deploy
+```
 
 ### Local Development
 

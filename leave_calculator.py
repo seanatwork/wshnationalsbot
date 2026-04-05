@@ -20,12 +20,15 @@ Usage:
 """
 
 import json
+import logging
 import sys
 import argparse
 import requests
 from datetime import date
 from pathlib import Path
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -125,6 +128,7 @@ def build_stats() -> dict:
     for season in SEASONS:
         all_games.extend(_fetch_season(season))
     stats = compute_comeback_stats(all_games)
+    logger.info(f"Leave calculator: analyzed {sum(v['total'] for v in stats.values()):,} game-situations")
     del all_games
     return stats
 
@@ -132,7 +136,7 @@ def build_stats() -> dict:
 
 def _fetch_season(season: int) -> list[dict]:
     """Fetch all completed regular-season games with inning-by-inning scores."""
-    print(f"  Fetching {season} season from MLB Stats API...", flush=True)
+    logger.info(f"Fetching {season} season from MLB Stats API...")
     url = f"{BASE_URL}/schedule"
     params = {
         "sportId": 1,
@@ -184,7 +188,7 @@ def _fetch_season(season: int) -> list[dict]:
                 "innings": inning_snapshots,
             })
 
-    print(f"    -> {len(games)} completed games")
+    logger.info(f"  -> {len(games)} completed games for {season}")
     return games
 
 
@@ -196,24 +200,23 @@ def load_games(refresh: bool = False) -> list[dict]:
                 cached = json.load(f)
             seasons_cached = cached.get("seasons", [])
             games = cached.get("games", [])
-            print(f"Loaded {len(games):,} games from cache (seasons: {seasons_cached})")
+            logger.info(f"Loaded {len(games):,} games from cache (seasons: {seasons_cached})")
             return games
         except (json.JSONDecodeError, IOError) as e:
-            print(f"Cache file corrupted or unreadable: {e}")
-            print("Re-fetching data from API...\n")
+            logger.warning(f"Cache file corrupted or unreadable: {e}. Re-fetching...")
 
     if refresh and CACHE_FILE.exists():
         CACHE_FILE.unlink()
-        print("Cache cleared, re-fetching...\n")
+        logger.info("Cache cleared, re-fetching...")
 
-    print("Fetching MLB game data (this takes ~30s the first time)...")
+    logger.info("Fetching MLB game data (this takes ~30s the first time)...")
     all_games: list[dict] = []
     for season in SEASONS:
         all_games.extend(_fetch_season(season))
 
     with open(CACHE_FILE, "w") as f:
         json.dump({"seasons": SEASONS, "games": all_games}, f)
-    print(f"\nCached {len(all_games):,} total games -> {CACHE_FILE}\n")
+    logger.info(f"Cached {len(all_games):,} total games -> {CACHE_FILE}")
     return all_games
 
 
