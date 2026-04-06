@@ -64,8 +64,8 @@ async def get_nationals_highlights() -> Optional[str]:
                 if status.get('abstractGameState') in ['Final', 'Live']:
                     game_ids.append(game.get('gamePk'))
         
-        # Fetch highlights for each game
-        for game_id in game_ids[:3]:
+        # Fetch highlights for each game (most recent first)
+        for game_id in reversed(game_ids[-5:]):
             if len(highlights) >= 3:
                 break
                 
@@ -78,7 +78,7 @@ async def get_nationals_highlights() -> Optional[str]:
                 content_data = content_resp.json()
                 
                 # Get highlights from game content
-                for highlight in content_data.get('highlights', {}).get('live', {}).get('items', [])[:3]:
+                for highlight in content_data.get('highlights', {}).get('highlights', {}).get('items', [])[:3]:
                     title = highlight.get('headline', highlight.get('title', 'Highlight'))
                     video_urls = highlight.get('playbacks', [])
                     
