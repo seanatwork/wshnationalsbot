@@ -284,100 +284,79 @@ async def alcentral_standings(update, context):
     await _division_standings(update, context, 'alc', 'AL Central')
 
 
-async def live_scores(update, context) -> None:
-    """Handle /scores command - show all live MLB games."""
-    try:
-        today = date.today()
-        yesterday = today - timedelta(days=1)
-        base_url = "https://statsapi.mlb.com/api/v1"
+def _get_live_scores_text() -> str:
+    """Return formatted live MLB scores as an HTML string."""
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    base_url = "https://statsapi.mlb.com/api/v1"
 
-        cache_key = f"live_scores_{today}"
-        cached_msg = _get_cached(cache_key, _TTL_LIVE)
-        if cached_msg is not None:
-            await context.bot.send_message(
-                chat_id=update.message.chat_id,
-                text=cached_msg,
-                parse_mode="HTML"
-            )
-            logger.debug("User checked live MLB scores (cached)")
-            return
+    cache_key = f"live_scores_{today}"
+    cached_msg = _get_cached(cache_key, _TTL_LIVE)
+    if cached_msg is not None:
+        return cached_msg
 
-        url = f"{base_url}/schedule"
-        params = {
+    resp = requests.get(
+        f"{base_url}/schedule",
+        params={
             "sportId": 1,
             "startDate": yesterday.strftime("%Y-%m-%d"),
             "endDate": today.strftime("%Y-%m-%d"),
             "gameType": "R",
             "hydrate": "linescore",
-        }
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json()
 
-        resp = await asyncio.to_thread(
-            requests.get, url, params=params, timeout=15
+    live_games = []
+    for date_entry in data.get("dates", []):
+        for game in date_entry.get("games", []):
+            status = game.get("status", {})
+            if status.get("abstractGameState") != "Live":
+                continue
+            teams = game.get("teams", {})
+            away_name = teams.get("away", {}).get("team", {}).get("name", "")
+            home_name = teams.get("home", {}).get("team", {}).get("name", "")
+            linescore = game.get("linescore", {})
+            away_score = linescore.get("teams", {}).get("away", {}).get("runs", 0) or teams.get("away", {}).get("score", 0)
+            home_score = linescore.get("teams", {}).get("home", {}).get("runs", 0) or teams.get("home", {}).get("score", 0)
+            live_games.append({
+                "away_team": away_name,
+                "home_team": home_name,
+                "away_score": away_score,
+                "home_score": home_score,
+                "inning": linescore.get("currentInning", 0),
+                "inning_half": linescore.get("inningHalf", ""),
+                "status": status.get("detailedState", ""),
+            })
+
+    if not live_games:
+        return "No live MLB games currently in progress."
+
+    message = "<b>📺 Live MLB Games:</b>\n\n"
+    for game in live_games:
+        half_str = f" ({game['inning_half']})" if game['inning_half'] else ""
+        message += (
+            f"<b>{game['away_team']} {game['away_score']} @ "
+            f"{game['home_team']} {game['home_score']}</b>\n"
+            f"Inning: {game['inning']}{half_str} | {game['status']}\n\n"
         )
-        resp.raise_for_status()
-        data = resp.json()
 
-        live_games = []
-        for date_entry in data.get("dates", []):
-            for game in date_entry.get("games", []):
-                status = game.get("status", {})
-                abstract = status.get("abstractGameState", "")
+    _set_cached(cache_key, message)
+    return message
 
-                if abstract != "Live":
-                    continue
 
-                teams = game.get("teams", {})
-                away_name = teams.get("away", {}).get("team", {}).get("name", "")
-                home_name = teams.get("home", {}).get("team", {}).get("name", "")
-
-                linescore = game.get("linescore", {})
-                away_score = linescore.get("teams", {}).get("away", {}).get("runs", 0)
-                home_score = linescore.get("teams", {}).get("home", {}).get("runs", 0)
-                current_inning = linescore.get("currentInning", 0)
-                inning_half = linescore.get("inningHalf", "")
-                detailed_status = status.get("detailedState", "")
-
-                if away_score == 0:
-                    away_score = teams.get("away", {}).get("score", 0)
-                if home_score == 0:
-                    home_score = teams.get("home", {}).get("score", 0)
-
-                live_games.append({
-                    "away_team": away_name,
-                    "home_team": home_name,
-                    "away_score": away_score,
-                    "home_score": home_score,
-                    "inning": current_inning,
-                    "inning_half": inning_half,
-                    "status": detailed_status
-                })
-
-        if not live_games:
-            no_games_msg = "No live MLB games currently in progress."
-            await context.bot.send_message(
-                chat_id=update.message.chat_id,
-                text=no_games_msg,
-                parse_mode="HTML"
-            )
-            return
-
-        message = "<b>📺 Live MLB Games:</b>\n\n"
-        for game in live_games:
-            half_str = f" ({game['inning_half']})" if game['inning_half'] else ""
-            message += (
-                f"<b>{game['away_team']} {game['away_score']} @ "
-                f"{game['home_team']} {game['home_score']}</b>\n"
-                f"Inning: {game['inning']}{half_str} | {game['status']}\n\n"
-            )
-
-        _set_cached(cache_key, message)
+async def live_scores(update, context) -> None:
+    """Handle /scores command - show all live MLB games."""
+    try:
+        message = await asyncio.to_thread(_get_live_scores_text)
         await context.bot.send_message(
             chat_id=update.message.chat_id,
             text=message,
             parse_mode="HTML"
         )
         logger.debug("User checked live MLB scores")
-
     except Exception as e:
         logger.error(f"Error fetching live scores: {e}")
         await context.bot.send_message(

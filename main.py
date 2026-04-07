@@ -1,13 +1,14 @@
 import threading
 import asyncio
 import logging
-from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, InlineQueryHandler, ContextTypes
 from mlbscores import (
     nats_schedule, mlb_scores,
     nlwest_standings, nleast_standings, nlcentral_standings,
     alwest_standings, aleast_standings, alcentral_standings,
-    get_past_games, live_scores, _format_standings
+    get_past_games, live_scores, _format_standings, schedule,
+    get_past_games_scores, _get_live_scores_text,
 )
 from stats import get_abs_challenge_stats, get_nationals_team_stats
 from highlights import get_nationals_highlights
@@ -231,6 +232,85 @@ async def highlights_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
     logger.debug("User requested Nationals highlights")
 
+_INLINE_HELP = (
+    "Try: <b>scores</b>, <b>schedule</b>, <b>past</b>, <b>stats</b>, "
+    "<b>nle</b> / <b>nlw</b> / <b>nlc</b> / <b>ale</b> / <b>alw</b> / <b>alc</b>"
+)
+
+_DIVISION_MAP = {
+    "nle": "nle", "nleast": "nle",
+    "nlw": "nlw", "nlwest": "nlw",
+    "nlc": "nlc", "nlcentral": "nlc",
+    "ale": "ale", "aleast": "ale",
+    "alw": "alw", "alwest": "alw",
+    "alc": "alc", "alcentral": "alc",
+}
+
+async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle inline queries: @botname <query>"""
+    query = update.inline_query.query.strip().lower()
+    results = []
+
+    if not query or query == "help":
+        results.append(InlineQueryResultArticle(
+            id="help",
+            title="WSH Nationals Bot — inline commands",
+            description="scores · schedule · past · stats · nle/nlw/nlc/ale/alw/alc",
+            input_message_content=InputTextMessageContent(
+                _INLINE_HELP, parse_mode="HTML"
+            ),
+        ))
+
+    elif query in ("scores", "live", "livescores"):
+        text = await asyncio.to_thread(_get_live_scores_text)
+        results.append(InlineQueryResultArticle(
+            id="scores",
+            title="Live MLB Scores",
+            description="Current scores for all games today",
+            input_message_content=InputTextMessageContent(text, parse_mode="HTML"),
+        ))
+
+    elif query in ("schedule", "sch"):
+        text = await asyncio.to_thread(schedule, NATIONALS_TEAM_ID, TIMEZONE)
+        results.append(InlineQueryResultArticle(
+            id="schedule",
+            title="Nationals Upcoming Schedule",
+            description="Next 4 days",
+            input_message_content=InputTextMessageContent(text, parse_mode="HTML"),
+        ))
+
+    elif query == "past":
+        text = await asyncio.to_thread(get_past_games_scores, NATIONALS_TEAM_ID)
+        results.append(InlineQueryResultArticle(
+            id="past",
+            title="Last 3 Nationals Results",
+            input_message_content=InputTextMessageContent(
+                text or "No recent games found.", parse_mode="HTML"
+            ),
+        ))
+
+    elif query == "stats":
+        text = await get_nationals_team_stats()
+        results.append(InlineQueryResultArticle(
+            id="stats",
+            title="Nationals Team Stats",
+            description="Hitting & pitching vs NL East and MLB",
+            input_message_content=InputTextMessageContent(text, parse_mode="HTML"),
+        ))
+
+    elif query in _DIVISION_MAP:
+        div_code = _DIVISION_MAP[query]
+        text = await asyncio.to_thread(_format_standings, div_code)
+        results.append(InlineQueryResultArticle(
+            id=f"standings_{div_code}",
+            title=f"{query.upper()} Standings",
+            input_message_content=InputTextMessageContent(text, parse_mode="HTML"),
+        ))
+
+    if results:
+        await update.inline_query.answer(results, cache_time=30)
+
+
 _BOT_COMMANDS = [
     BotCommand("start", "Welcome message and getting started"),
     BotCommand("sch", "Nationals upcoming schedule"),
@@ -276,6 +356,9 @@ def main():
     # Add callback handlers
     application.add_handler(CallbackQueryHandler(standings_callback, pattern="^standings_"))
     application.add_handler(CallbackQueryHandler(stats_callback, pattern="^stats_"))
+
+    # Inline query handler
+    application.add_handler(InlineQueryHandler(inline_query))
 
     # Set up daily job for posting yesterday's scores
     job_queue = application.job_queue
