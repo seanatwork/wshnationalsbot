@@ -22,6 +22,9 @@ DAILY_POST_TIME = os.getenv('DAILY_POST_TIME', '10:00')
 # Leave calculator settings
 LEAVE_FP_RATE = float(os.getenv('LEAVE_FP_RATE', '0.05'))
 
+# Subscribers file path (use a Fly.io persistent volume mount in production)
+SUBSCRIBERS_FILE = os.getenv('SUBSCRIBERS_FILE', '/data/subscribers.json')
+
 # Health check configuration
 HEALTHCHECK_PORT = int(os.getenv('HEALTHCHECK_PORT', '8000'))
 HEALTHCHECK_HOST = os.getenv('HEALTHCHECK_HOST', '0.0.0.0')

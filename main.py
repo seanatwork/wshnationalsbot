@@ -11,6 +11,8 @@ from mlbscores import (
     get_past_games_scores, _get_live_scores_text,
 )
 from stats import get_abs_challenge_stats, get_nationals_team_stats, get_roster_moves
+from lineup_notifier import add_subscriber, remove_subscriber, check_and_notify
+from player import get_splits, get_contract
 from highlights import get_nationals_highlights
 from leave_calculator import build_stats, fetch_live_game, should_leave, _completed_inning
 from logger import setup_logger, get_logger
@@ -56,6 +58,9 @@ Your Washington Nationals companion for Telegram.
 /past - Last 3 game results
 /scores - Live MLB scores
 /standings - All 6 division standings
+/splits - Player splits (vs L/R, home/away, recent)
+/contract - Contract &amp; fun salary facts
+/lineup - Subscribe to gameday lineup notifications
 /roster - Recent roster moves
 /highlights - Recent Nationals video highlights
 /stats - Team stats vs NL East &amp; MLB
@@ -75,6 +80,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 /past - Last 3 Nationals game results
 /standings - All MLB division standings
 /scores - Live MLB scores
+/splits &lt;player&gt; - Splits vs L/R, home/away, last 7/15/30d
+/contract &lt;player&gt; - Contract &amp; fun salary facts
+/lineup on/off - Gameday lineup notifications
 /roster - Recent Nationals roster moves
 /leave [team] - Leave game calculator (optional team argument, defaults to "nationals")
 /help - Show this help message
@@ -215,6 +223,62 @@ async def stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text(text=stats_text, parse_mode="HTML")
         logger.debug("User checked ABS challenge stats")
 
+async def splits_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /splits PlayerName — show hitting/pitching splits."""
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /splits <player name>\nExample: /splits Abrams",
+            parse_mode="HTML",
+        )
+        return
+    name = " ".join(context.args)
+    text = await get_splits(name)
+    await update.message.reply_text(text, parse_mode="HTML")
+    logger.debug(f"User requested splits for {name}")
+
+async def contract_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /contract PlayerName — show contract and fun salary facts."""
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /contract <player name>\nExample: /contract Abrams",
+            parse_mode="HTML",
+        )
+        return
+    name = " ".join(context.args)
+    text = await get_contract(name)
+    await update.message.reply_text(text, parse_mode="HTML")
+    logger.debug(f"User requested contract for {name}")
+
+async def lineup_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /lineup command - subscribe or unsubscribe from lineup notifications."""
+    arg = context.args[0].lower() if context.args else ""
+    chat_id = update.effective_chat.id
+
+    if arg == "on":
+        added = await asyncio.to_thread(add_subscriber, chat_id)
+        if added:
+            await update.message.reply_text(
+                "You're subscribed to Nationals lineup notifications!\n\n"
+                "I'll message you here when today's lineup is posted (~60-90 min before first pitch).\n\n"
+                "Use /lineup off to unsubscribe.",
+                parse_mode="HTML",
+            )
+        else:
+            await update.message.reply_text("You're already subscribed. Use /lineup off to unsubscribe.")
+    elif arg == "off":
+        removed = await asyncio.to_thread(remove_subscriber, chat_id)
+        if removed:
+            await update.message.reply_text("You've been unsubscribed from lineup notifications.")
+        else:
+            await update.message.reply_text("You weren't subscribed. Use /lineup on to subscribe.")
+    else:
+        await update.message.reply_text(
+            "<b>Lineup Notifications</b>\n\n"
+            "/lineup on — get notified when today's lineup is posted\n"
+            "/lineup off — stop notifications",
+            parse_mode="HTML",
+        )
+
 async def roster_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /roster command - show recent Nationals roster moves."""
     text = await get_roster_moves()
@@ -321,6 +385,9 @@ _BOT_COMMANDS = [
     BotCommand("start", "Welcome message and getting started"),
     BotCommand("sch", "Nationals upcoming schedule"),
     BotCommand("past", "Last 3 Nationals game results"),
+    BotCommand("splits", "Player splits (vs L/R, home/away, last 7/15/30d)"),
+    BotCommand("contract", "Player contract & fun salary facts"),
+    BotCommand("lineup", "Subscribe to gameday lineup notifications"),
     BotCommand("roster", "Recent Nationals roster moves"),
     BotCommand("highlights", "Recent Nationals video highlights"),
     BotCommand("scores", "Live MLB scores"),
@@ -354,6 +421,9 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("sch", nats_schedule))
     application.add_handler(CommandHandler("past", get_past_games))
+    application.add_handler(CommandHandler("splits", splits_command))
+    application.add_handler(CommandHandler("contract", contract_command))
+    application.add_handler(CommandHandler("lineup", lineup_command))
     application.add_handler(CommandHandler("roster", roster_command))
     application.add_handler(CommandHandler("highlights", highlights_command))
     application.add_handler(CommandHandler("standings", standings_command))
@@ -380,6 +450,13 @@ def main():
             time=time(hour, minute, tzinfo=tz)
         )
         logger.info(f"Daily job scheduled: {job}")
+
+        lineup_job = job_queue.run_repeating(
+            check_and_notify,
+            interval=600,  # every 10 minutes
+            first=60,      # first check 60s after startup
+        )
+        logger.info(f"Lineup polling job scheduled: {lineup_job}")
     else:
         logger.error("Failed to initialize job queue")
 
