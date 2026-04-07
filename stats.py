@@ -129,6 +129,63 @@ async def get_nationals_team_stats() -> Optional[str]:
         return "Sorry, couldn't fetch team stats right now. Please try again later."
 
 
+async def get_roster_moves() -> str:
+    """Get the most recent Nationals roster transactions."""
+    cache_key = f"roster_moves_{date.today()}"
+    cached = _get_cached(cache_key, 300)  # 5-min cache
+    if cached is not None:
+        return cached
+
+    try:
+        current_year = date.today().year
+        resp = await asyncio.to_thread(
+            requests.get,
+            f"https://statsapi.mlb.com/api/v1/transactions",
+            params={
+                "teamId": NATIONALS_TEAM_ID,
+                "startDate": (date.today() - timedelta(days=14)).isoformat(),
+                "endDate": date.today().isoformat(),
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        transactions = resp.json().get("transactions", [])
+
+        if not transactions:
+            return "<b>⚾ Nationals Roster Moves</b>\n\nNo transactions in the last 14 days."
+
+        # Sort newest first
+        transactions.sort(key=lambda t: t.get("date", ""), reverse=True)
+
+        lines = ["<b>⚾ Nationals Recent Roster Moves</b>\n"]
+        shown = 0
+        last_date = None
+        for t in transactions:
+            if shown >= 10:
+                break
+            raw_date = t.get("date", "")
+            try:
+                d = datetime.strptime(raw_date, "%Y-%m-%d").strftime("%b %-d")
+            except Exception:
+                d = raw_date
+            description = t.get("description", "").strip()
+            if not description:
+                continue
+            if d != last_date:
+                lines.append(f"\n<b>{d}</b>")
+                last_date = d
+            lines.append(f"• {description}")
+            shown += 1
+
+        result = "\n".join(lines)
+        _set_cached(cache_key, result)
+        return result
+
+    except Exception as e:
+        logger.error(f"Error fetching roster moves: {e}")
+        return "Sorry, couldn't fetch roster moves right now. Please try again later."
+
+
 async def get_abs_challenge_stats() -> Optional[str]:
     """Get league-wide ABS challenge stats scraped from Baseball Savant."""
     cache_key = f"abs_stats_{date.today()}"

@@ -10,7 +10,7 @@ from mlbscores import (
     get_past_games, live_scores, _format_standings, schedule,
     get_past_games_scores, _get_live_scores_text,
 )
-from stats import get_abs_challenge_stats, get_nationals_team_stats
+from stats import get_abs_challenge_stats, get_nationals_team_stats, get_roster_moves
 from highlights import get_nationals_highlights
 from leave_calculator import build_stats, fetch_live_game, should_leave, _completed_inning
 from logger import setup_logger, get_logger
@@ -56,6 +56,7 @@ Your Washington Nationals companion for Telegram.
 /past - Last 3 game results
 /scores - Live MLB scores
 /standings - All 6 division standings
+/roster - Recent roster moves
 /highlights - Recent Nationals video highlights
 /stats - Team stats vs NL East &amp; MLB
 /leave - Should you leave the game early?
@@ -74,6 +75,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 /past - Last 3 Nationals game results
 /standings - All MLB division standings
 /scores - Live MLB scores
+/roster - Recent Nationals roster moves
 /leave [team] - Leave game calculator (optional team argument, defaults to "nationals")
 /help - Show this help message
 
@@ -213,6 +215,12 @@ async def stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text(text=stats_text, parse_mode="HTML")
         logger.debug("User checked ABS challenge stats")
 
+async def roster_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /roster command - show recent Nationals roster moves."""
+    text = await get_roster_moves()
+    await update.message.reply_text(text, parse_mode="HTML")
+    logger.debug("User requested Nationals roster moves")
+
 async def highlights_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /highlights command - show recent Nationals video highlights."""
     highlights_text = await get_nationals_highlights()
@@ -313,6 +321,7 @@ _BOT_COMMANDS = [
     BotCommand("start", "Welcome message and getting started"),
     BotCommand("sch", "Nationals upcoming schedule"),
     BotCommand("past", "Last 3 Nationals game results"),
+    BotCommand("roster", "Recent Nationals roster moves"),
     BotCommand("highlights", "Recent Nationals video highlights"),
     BotCommand("scores", "Live MLB scores"),
     BotCommand("leave", "Should you leave? (e.g. /leave nationals)"),
@@ -345,6 +354,7 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("sch", nats_schedule))
     application.add_handler(CommandHandler("past", get_past_games))
+    application.add_handler(CommandHandler("roster", roster_command))
     application.add_handler(CommandHandler("highlights", highlights_command))
     application.add_handler(CommandHandler("standings", standings_command))
     application.add_handler(CommandHandler("stats", stats_command))
