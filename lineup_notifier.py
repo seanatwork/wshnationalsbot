@@ -12,7 +12,7 @@ from config import NATIONALS_TEAM_ID, TIMEZONE, SUBSCRIBERS_FILE
 
 logger = get_logger(__name__)
 
-_file_lock = threading.Lock()
+_file_lock = threading.RLock()
 
 # Track which gamePks we've already notified for (resets on restart, which is fine —
 # the window check prevents double-sends across a normal restart).
@@ -168,12 +168,12 @@ async def check_and_notify(context) -> None:
         if message is None:
             return  # Lineup not posted yet
 
-        _lineup_sent.add(game_pk)
-
         subscribers = load_subscribers()
         if not subscribers:
             logger.info("Lineup available but no subscribers to notify.")
             return
+
+        _lineup_sent.add(game_pk)
 
         for chat_id in subscribers:
             try:
