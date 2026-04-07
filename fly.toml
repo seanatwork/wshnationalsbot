@@ -5,6 +5,8 @@
 
 app = 'wshnationalsbot'
 primary_region = 'dfw'
+kill_signal = "SIGINT"
+kill_timeout = "30s"
 
 [build]
 
