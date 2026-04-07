@@ -9,7 +9,7 @@ from mlbscores import (
     alwest_standings, aleast_standings, alcentral_standings,
     get_past_games, live_scores, _format_standings
 )
-from stats import get_abs_challenge_stats
+from stats import get_abs_challenge_stats, get_nationals_team_stats
 from highlights import get_nationals_highlights
 from leave_calculator import build_stats, fetch_live_game, should_leave, _completed_inning
 from logger import setup_logger, get_logger
@@ -46,20 +46,23 @@ def _wait_for_stats() -> bool:
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command - welcome message."""
-    welcome_text = """
-<b>Welcome to WSH Nationals Bot! 🏟️</b>
+    welcome_text = """<b>Welcome to WSH Nationals Bot! 🏟️</b>
 
-Get Washington Nationals MLB information including schedules, standings, and recent game results.
+Your Washington Nationals companion for Telegram.
 
-<b>Quick Start:</b>
-/sch - Nationals upcoming schedule
-/past - Last 3 Nationals game results
-/standings - All MLB division standings
-/scores - Live MLB games
-/leave - Should you leave the game?
+<b>Commands:</b>
+/sch - Upcoming schedule (next 4 days)
+/past - Last 3 game results
+/scores - Live MLB scores
+/standings - All 6 division standings
+/highlights - Recent Nationals video highlights
+/stats - Team stats vs NL East &amp; MLB
+/leave - Should you leave the game early?
+/help - Show all commands
 
-/help - See all commands
-"""
+<a href="https://github.com/seanatwork/wshnationalsbot">Source on GitHub</a>
+
+<i>Privacy: This bot does not collect or store any personal data. Game data is sourced from the public MLB Stats API.</i>"""
     await update.message.reply_text(welcome_text, parse_mode="HTML", disable_web_page_preview=True)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -193,7 +196,8 @@ async def standings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /stats command - show statistics menu."""
     keyboard = [
-        [InlineKeyboardButton("ABS Challenge Success Rate", callback_data="stats_abs")]
+        [InlineKeyboardButton("Team Stats vs NL East & MLB", callback_data="stats_team")],
+        [InlineKeyboardButton("ABS Challenge Success Rate", callback_data="stats_abs")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -208,12 +212,13 @@ async def stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     await query.answer()
     
-    if query.data == "stats_abs":
+    if query.data == "stats_team":
+        stats_text = await get_nationals_team_stats()
+        await query.edit_message_text(text=stats_text, parse_mode="HTML")
+        logger.debug("User checked Nationals team stats")
+    elif query.data == "stats_abs":
         stats_text = await get_abs_challenge_stats()
-        await query.edit_message_text(
-            text=stats_text,
-            parse_mode="HTML"
-        )
+        await query.edit_message_text(text=stats_text, parse_mode="HTML")
         logger.debug("User checked ABS challenge stats")
 
 async def highlights_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
