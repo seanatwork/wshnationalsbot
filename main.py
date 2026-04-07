@@ -1,7 +1,7 @@
 import threading
 import asyncio
 import logging
-from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
+from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InlineQueryResultsButton, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, InlineQueryHandler, ContextTypes
 from mlbscores import (
     nats_schedule, mlb_scores,
@@ -196,17 +196,8 @@ async def standings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /stats command - show statistics menu."""
-    keyboard = [
-        [InlineKeyboardButton("Team Stats vs NL East & MLB", callback_data="stats_team")],
-        [InlineKeyboardButton("ABS Challenge Success Rate", callback_data="stats_abs")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        "<b>Select a statistic to view:</b>",
-        parse_mode="HTML",
-        reply_markup=reply_markup
-    )
+    stats_text = await get_nationals_team_stats()
+    await update.message.reply_text(stats_text, parse_mode="HTML")
 
 async def stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle stats selection from menu."""
@@ -307,8 +298,15 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             input_message_content=InputTextMessageContent(text, parse_mode="HTML"),
         ))
 
-    if results:
-        await update.inline_query.answer(results, cache_time=30)
+    await update.inline_query.answer(
+        results,
+        cache_time=300,
+        is_personal=False,
+        button=InlineQueryResultsButton(
+            text="scores · schedule · past · stats · nle/nlw/nlc/ale/alw/alc",
+            start_parameter="inline_help",
+        ) if not results else None,
+    )
 
 
 _BOT_COMMANDS = [
