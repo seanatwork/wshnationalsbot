@@ -3,6 +3,7 @@ import asyncio
 import json
 import re
 import time
+import xml.etree.ElementTree as ET
 import statsapi
 import requests
 from datetime import datetime, date, timedelta
@@ -184,6 +185,106 @@ async def get_roster_moves() -> str:
     except Exception as e:
         logger.error(f"Error fetching roster moves: {e}")
         return "Sorry, couldn't fetch roster moves right now. Please try again later."
+
+
+# Track alerted transaction IDs — resets on restart, which is fine
+_alerted_transaction_ids: set = set()
+_alerted_date: date | None = None
+
+
+def fetch_new_transactions() -> list[str]:
+    """
+    Return descriptions of any transactions posted today that haven't been alerted yet.
+    Resets the seen-set daily so IDs don't accumulate across days.
+    """
+    global _alerted_transaction_ids, _alerted_date
+    today = date.today()
+
+    if _alerted_date != today:
+        _alerted_transaction_ids = set()
+        _alerted_date = today
+
+    try:
+        resp = requests.get(
+            "https://statsapi.mlb.com/api/v1/transactions",
+            params={
+                "teamId": NATIONALS_TEAM_ID,
+                "startDate": today.isoformat(),
+                "endDate": today.isoformat(),
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        transactions = resp.json().get("transactions", [])
+
+        new = []
+        for t in transactions:
+            tid  = t.get("id") or t.get("description", "")
+            desc = t.get("description", "").strip()
+            if not desc or tid in _alerted_transaction_ids:
+                continue
+            _alerted_transaction_ids.add(tid)
+            new.append(desc)
+        return new
+    except Exception as e:
+        logger.error(f"Error fetching transactions: {e}")
+        return []
+
+
+def _fetch_nationals_news() -> list[str]:
+    """Return headline strings from the MLB.com Nationals RSS feed, last 7 days."""
+    try:
+        resp = requests.get(
+            "https://www.mlb.com/nationals/feeds/news/rss.xml",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+        cutoff = date.today() - timedelta(days=7)
+
+        headlines = []
+        for item in root.iter("item"):
+            title = (item.findtext("title") or "").strip()
+            pub   = item.findtext("pubDate") or ""
+            # pubDate format: "Mon, 07 Apr 2026 12:00:00 +0000"
+            try:
+                pub_date = datetime.strptime(pub[:16], "%a, %d %b %Y").date()
+                if pub_date < cutoff:
+                    continue
+            except Exception:
+                pass  # include if we can't parse the date
+            if title:
+                headlines.append(f"• {title}")
+            if len(headlines) >= 8:
+                break
+        return headlines
+    except Exception as e:
+        logger.error(f"Error fetching Nationals RSS: {e}")
+        return []
+
+
+async def get_weekly_digest() -> str:
+    """Build the Friday weekly digest: news headlines only (transactions posted same-day now)."""
+    news = await asyncio.to_thread(_fetch_nationals_news)
+
+    today = date.today()
+    week_start = (today - timedelta(days=6)).strftime("%b %-d")
+    week_end   = today.strftime("%b %-d")
+
+    lines = [
+        f"<b>⚾ Nationals Week in Review</b>",
+        f"<i>{week_start} – {week_end}</i>",
+        "",
+        "<b>📰 News &amp; Notes</b>",
+    ]
+
+    if news:
+        lines.extend(news)
+    else:
+        lines.append("No news items this week.")
+
+    return "\n".join(lines)
 
 
 async def get_abs_challenge_stats() -> Optional[str]:

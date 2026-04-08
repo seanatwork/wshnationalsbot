@@ -22,6 +22,9 @@ DAILY_POST_TIME = os.getenv('DAILY_POST_TIME', '10:00')
 # Leave calculator settings
 LEAVE_FP_RATE = float(os.getenv('LEAVE_FP_RATE', '0.05'))
 
+# Channel to auto-post daily lineups (set to None to disable)
+LINEUP_CHANNEL_ID = os.getenv('LINEUP_CHANNEL_ID')
+
 # Subscribers file path (use a Fly.io persistent volume mount in production)
 SUBSCRIBERS_FILE = os.getenv('SUBSCRIBERS_FILE', '/data/subscribers.json')
 

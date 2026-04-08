@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 from typing import Optional
 
 from logger import get_logger
-from config import CHAT_ID, NATIONALS_TEAM_ID, TIMEZONE
+from config import CHAT_ID, NATIONALS_TEAM_ID, TIMEZONE, LINEUP_CHANNEL_ID
 
 logger = get_logger(__name__)
 
@@ -101,7 +101,7 @@ def get_yesterday_scores(team_id: int) -> Optional[str]:
 
 
 def mlb_scores(context) -> None:
-    """Daily job: post yesterday's Nationals scores."""
+    """Daily job: post yesterday's Nationals scores to the main chat."""
     try:
         message = get_yesterday_scores(NATIONALS_TEAM_ID)
         if message is not None:
@@ -114,6 +114,132 @@ def mlb_scores(context) -> None:
             logger.info('No Nationals game yesterday to post')
     except Exception as e:
         logger.error(f"Error posting daily scores: {e}")
+
+
+def _get_gameday_preview_text() -> Optional[str]:
+    """Build a game day preview for today's Nationals game, or None if no game."""
+    today = date.today().strftime("%Y-%m-%d")
+    try:
+        resp = requests.get(
+            f"https://statsapi.mlb.com/api/v1/schedule",
+            params={
+                "teamId": NATIONALS_TEAM_ID,
+                "startDate": today,
+                "endDate": today,
+                "sportId": 1,
+                "hydrate": "probablePitcher,broadcasts(all),linescore,team",
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        dates = resp.json().get("dates", [])
+        if not dates:
+            return None
+
+        game = dates[0]["games"][0]
+        teams  = game.get("teams", {})
+        away   = teams.get("away", {})
+        home   = teams.get("home", {})
+        away_name = away.get("team", {}).get("name", "Away")
+        home_name = home.get("team", {}).get("name", "Home")
+        is_home = home.get("team", {}).get("id") == NATIONALS_TEAM_ID
+        opponent = away_name if is_home else home_name
+
+        # First pitch time
+        game_dt_str = game.get("gameDate", "")
+        time_str = ""
+        try:
+            game_dt = datetime.strptime(game_dt_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.utc)
+            local   = game_dt.astimezone(pytz.timezone(TIMEZONE))
+            hour    = local.hour % 12 or 12
+            minute  = local.strftime("%M")
+            am_pm   = local.strftime("%p")
+            tz_abbr = local.tzname() or "CT"
+            time_str = f"{hour}:{minute} {am_pm} {tz_abbr}"
+        except Exception:
+            pass
+
+        # Probable pitchers
+        away_pitcher = away.get("probablePitcher", {}).get("fullName", "TBD")
+        home_pitcher = home.get("probablePitcher", {}).get("fullName", "TBD")
+
+        # Broadcasts
+        broadcasts = game.get("broadcasts", [])
+        tv = [b["name"] for b in broadcasts if b.get("type") == "TV"]
+        tv_str = " · ".join(tv) if tv else "Check local listings"
+
+        home_away = "🏠 Home" if is_home else "✈️ Away"
+
+        lines = [
+            f"<b>⚾ Game Day — {home_away}</b>",
+            f"<b>Nationals vs {opponent}</b>",
+            f"<i>First pitch: {time_str}</i>",
+            "",
+            "<b>Probable Pitchers</b>",
+            f"• {away_name}: {away_pitcher}",
+            f"• {home_name}: {home_pitcher}",
+            "",
+            f"<b>📺</b> {tv_str}",
+        ]
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error building game day preview: {e}")
+        return None
+
+
+async def post_gameday_preview(context) -> None:
+    """Daily job: post game day preview to channel at 9 AM CT if there's a game."""
+    if not LINEUP_CHANNEL_ID:
+        return
+    try:
+        text = await asyncio.to_thread(_get_gameday_preview_text)
+        if text:
+            await context.bot.send_message(
+                chat_id=LINEUP_CHANNEL_ID,
+                text=text,
+                parse_mode="HTML",
+            )
+            logger.info("Posted game day preview to channel")
+        else:
+            logger.info("No game today — skipping preview post")
+    except Exception as e:
+        logger.error(f"Error posting game day preview: {e}")
+
+
+async def post_monday_standings(context) -> None:
+    """Weekly job: post NL East standings to channel every Monday morning."""
+    if not LINEUP_CHANNEL_ID:
+        return
+    try:
+        text = await asyncio.to_thread(_format_standings, "nle")
+        header = "<b>⚾ Monday Morning Standings</b>\n\n"
+        await context.bot.send_message(
+            chat_id=LINEUP_CHANNEL_ID,
+            text=header + text,
+            parse_mode="HTML",
+        )
+        logger.info("Posted Monday standings to channel")
+    except Exception as e:
+        logger.error(f"Error posting Monday standings: {e}")
+
+
+async def post_yesterday_to_channel(context) -> None:
+    """Daily job: post yesterday's Nationals result to the lineup channel at 9:30 AM CT."""
+    if not LINEUP_CHANNEL_ID:
+        return
+    try:
+        message = await asyncio.to_thread(get_yesterday_scores, NATIONALS_TEAM_ID)
+        if message is not None:
+            await context.bot.send_message(
+                chat_id=LINEUP_CHANNEL_ID,
+                text=message,
+                parse_mode="HTML",
+            )
+            logger.info("Posted yesterday's scores to channel")
+        else:
+            logger.info("No Nationals game yesterday — skipping channel post")
+    except Exception as e:
+        logger.error(f"Error posting yesterday's scores to channel: {e}")
 
 
 def schedule(team_id: int, user_timezone: str) -> str:

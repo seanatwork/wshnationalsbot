@@ -4,13 +4,14 @@ import logging
 from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InlineQueryResultsButton, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, InlineQueryHandler, ContextTypes
 from mlbscores import (
-    nats_schedule, mlb_scores,
+    nats_schedule, mlb_scores, post_yesterday_to_channel,
+    post_gameday_preview, post_monday_standings,
     nlwest_standings, nleast_standings, nlcentral_standings,
     alwest_standings, aleast_standings, alcentral_standings,
     get_past_games, live_scores, _format_standings, schedule,
     get_past_games_scores, _get_live_scores_text,
 )
-from stats import get_abs_challenge_stats, get_nationals_team_stats, get_roster_moves
+from stats import get_abs_challenge_stats, get_nationals_team_stats, get_roster_moves, get_weekly_digest, fetch_new_transactions
 from lineup_notifier import add_subscriber, remove_subscriber, check_and_notify
 from player import get_splits, get_contract
 from highlights import get_nationals_highlights
@@ -18,7 +19,7 @@ from leave_calculator import build_stats, fetch_live_game, should_leave, _comple
 from logger import setup_logger, get_logger
 from config import (
     BOT_TOKEN, CHAT_ID, TIMEZONE, DAILY_POST_TIME,
-    NATIONALS_TEAM_ID, LEAVE_FP_RATE, validate_config
+    NATIONALS_TEAM_ID, LEAVE_FP_RATE, LINEUP_CHANNEL_ID, validate_config
 )
 from datetime import time
 import pytz
@@ -451,10 +452,101 @@ def main():
         )
         logger.info(f"Daily job scheduled: {job}")
 
+        # 9:30 AM CT — yesterday's score + today's game preview (if applicable)
+        async def post_morning_update(context) -> None:
+            await post_yesterday_to_channel(context)
+            await post_gameday_preview(context)
+
+        morning_job = job_queue.run_daily(
+            post_morning_update,
+            time=time(9, 30, tzinfo=tz)
+        )
+        logger.info(f"Morning update job scheduled: {morning_job}")
+
+        # Wednesday 12:30 PM EST (11:30 AM CT) — highlights
+        async def post_weekly_highlights(context) -> None:
+            if not LINEUP_CHANNEL_ID:
+                return
+            try:
+                text = await get_nationals_highlights()
+                await context.bot.send_message(
+                    chat_id=LINEUP_CHANNEL_ID,
+                    text=text,
+                    parse_mode="HTML",
+                    disable_web_page_preview=False,
+                )
+                logger.info("Posted weekly highlights to channel")
+            except Exception as e:
+                logger.error(f"Error posting weekly highlights: {e}")
+
+        highlights_job = job_queue.run_daily(
+            post_weekly_highlights,
+            time=time(11, 30, tzinfo=tz),  # 11:30 AM CT = 12:30 PM ET
+            days=(2,),                      # Wednesday only (0=Mon … 2=Wed)
+        )
+        logger.info(f"Weekly highlights job scheduled: {highlights_job}")
+
+        # Monday 9:00 AM CT — NL East standings
+        monday_standings_job = job_queue.run_daily(
+            post_monday_standings,
+            time=time(9, 0, tzinfo=tz),
+            days=(0,),  # Monday only (0=Mon)
+        )
+        logger.info(f"Monday standings job scheduled: {monday_standings_job}")
+
+        # Friday 6:00 PM CT — weekly news digest
+        async def post_weekly_digest(context) -> None:
+            if not LINEUP_CHANNEL_ID:
+                return
+            try:
+                text = await get_weekly_digest()
+                await context.bot.send_message(
+                    chat_id=LINEUP_CHANNEL_ID,
+                    text=text,
+                    parse_mode="HTML",
+                )
+                logger.info("Posted weekly digest to channel")
+            except Exception as e:
+                logger.error(f"Error posting weekly digest: {e}")
+
+        weekly_job = job_queue.run_daily(
+            post_weekly_digest,
+            time=time(18, 0, tzinfo=tz),
+            days=(4,),  # Friday only
+        )
+        logger.info(f"Weekly digest job scheduled: {weekly_job}")
+
+        # Every 30 min — transaction alerts
+        async def check_transactions(context) -> None:
+            if not LINEUP_CHANNEL_ID:
+                return
+            try:
+                new = await asyncio.to_thread(fetch_new_transactions)
+                if not new:
+                    return
+                lines = ["<b>🔔 Nationals Transaction Alert</b>", ""]
+                lines.extend(f"• {desc}" for desc in new)
+                await context.bot.send_message(
+                    chat_id=LINEUP_CHANNEL_ID,
+                    text="\n".join(lines),
+                    parse_mode="HTML",
+                )
+                logger.info(f"Posted {len(new)} transaction alert(s) to channel")
+            except Exception as e:
+                logger.error(f"Error posting transaction alerts: {e}")
+
+        transaction_job = job_queue.run_repeating(
+            check_transactions,
+            interval=1800,  # every 30 minutes
+            first=90,
+        )
+        logger.info(f"Transaction alert job scheduled: {transaction_job}")
+
+        # Every 10 min — lineup notifications
         lineup_job = job_queue.run_repeating(
             check_and_notify,
-            interval=600,  # every 10 minutes
-            first=60,      # first check 60s after startup
+            interval=600,
+            first=60,
         )
         logger.info(f"Lineup polling job scheduled: {lineup_job}")
     else:

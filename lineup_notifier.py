@@ -8,7 +8,7 @@ import pytz
 from datetime import date, datetime
 
 from logger import get_logger
-from config import NATIONALS_TEAM_ID, TIMEZONE, SUBSCRIBERS_FILE
+from config import NATIONALS_TEAM_ID, TIMEZONE, SUBSCRIBERS_FILE, LINEUP_CHANNEL_ID
 
 logger = get_logger(__name__)
 
@@ -16,7 +16,8 @@ _file_lock = threading.RLock()
 
 # Track which gamePks we've already notified for (resets on restart, which is fine —
 # the window check prevents double-sends across a normal restart).
-_lineup_sent: set[int] = set()
+_lineup_sent: set[int] = set()         # subscriber DMs
+_channel_lineup_sent: set[int] = set() # channel post
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +169,20 @@ async def check_and_notify(context) -> None:
         if message is None:
             return  # Lineup not posted yet
 
+        # Post to channel
+        if LINEUP_CHANNEL_ID and game_pk not in _channel_lineup_sent:
+            try:
+                await context.bot.send_message(
+                    chat_id=LINEUP_CHANNEL_ID,
+                    text=message,
+                    parse_mode="HTML",
+                )
+                _channel_lineup_sent.add(game_pk)
+                logger.info(f"Lineup posted to channel {LINEUP_CHANNEL_ID} for gamePk {game_pk}")
+            except Exception as e:
+                logger.warning(f"Failed to post lineup to channel: {e}")
+
+        # DM subscribers
         subscribers = load_subscribers()
         if not subscribers:
             logger.info("Lineup available but no subscribers to notify.")
