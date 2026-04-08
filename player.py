@@ -1,5 +1,6 @@
 """Player lookup, splits, and contract data."""
 import asyncio
+import re
 import time
 import requests
 import statsapi
@@ -9,6 +10,14 @@ from typing import Optional
 from logger import get_logger
 
 logger = get_logger(__name__)
+
+_BREF_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/123.0.0.0 Safari/537.36"
+    )
+}
 
 _cache: dict[str, tuple[float, object]] = {}
 
@@ -207,57 +216,108 @@ async def get_splits(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Contract / Salary
+# Contract / Salary — sourced from Baseball Reference
 # ---------------------------------------------------------------------------
 
-def _fetch_salary(player_id: int) -> Optional[int]:
-    """Try multiple MLB API approaches to get the player's current salary."""
-    season = _current_season()
+def _bref_id_candidates(full_name: str) -> list[str]:
+    """
+    Generate candidate Baseball Reference player IDs from a full name.
+    Pattern: first 5 chars of last name + first 2 chars of first name + 01/02/03
+    e.g. "CJ Abrams" → ["abramcj01", "abramcj02"]
+    """
+    parts = full_name.strip().split()
+    if len(parts) < 2:
+        return []
+    first = re.sub(r"[^a-z]", "", parts[0].lower())
+    last  = re.sub(r"[^a-z]", "", parts[-1].lower())
+    stem  = (last[:5] + first[:2]).ljust(7, "a")
+    return [f"{stem}0{n}" for n in range(1, 4)]
 
-    # Attempt 1: hydrate=contract on people endpoint
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/people/{player_id}",
-            params={"hydrate": "contract"},
-            timeout=15,
+
+def _fetch_bref_salary(full_name: str) -> tuple[Optional[int], Optional[str]]:
+    """
+    Scrape Baseball Reference for current season salary and contract note.
+    Returns (salary_int_or_None, contract_note_or_None).
+    """
+    season = str(_current_season())
+    candidates = _bref_id_candidates(full_name)
+
+    for bref_id in candidates:
+        url = f"https://www.baseball-reference.com/players/{bref_id[0]}/{bref_id}.shtml"
+        try:
+            resp = requests.get(url, headers=_BREF_HEADERS, timeout=15)
+            if resp.status_code == 404:
+                continue
+            resp.raise_for_status()
+        except Exception as e:
+            logger.debug(f"BBRef fetch failed for {bref_id}: {e}")
+            continue
+
+        html = resp.text
+
+        # Verify we landed on the right player (name check)
+        if full_name.split()[-1].lower() not in html.lower():
+            continue
+
+        # Extract salary for current season from the salary table
+        # Rows look like: data-year="2026" ... data-amount="4200000"
+        salary_pattern = re.compile(
+            r'data-year="' + re.escape(season) + r'"[^>]*data-amount="([0-9.]+)"'
+            r'|data-amount="([0-9.]+)"[^>]*data-year="' + re.escape(season) + r'"'
         )
-        resp.raise_for_status()
-        people = resp.json().get("people", [])
-        if people:
-            p = people[0]
-            # Some responses include currentSalary directly
-            sal = p.get("currentSalary") or p.get("salary")
-            if sal:
-                return int(sal)
-            # Others have a contracts list
-            for c in p.get("contracts", []):
-                if str(c.get("season", "")) == str(season):
-                    return int(c.get("salary", 0)) or None
-    except Exception as e:
-        logger.debug(f"Contract hydrate attempt failed: {e}")
+        m = salary_pattern.search(html)
+        salary = None
+        if m:
+            raw = m.group(1) or m.group(2)
+            try:
+                salary = int(float(raw))
+            except ValueError:
+                pass
 
-    # Attempt 2: team roster with contract hydration (Nats only, but broadens coverage)
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/teams/120/roster",
-            params={
-                "rosterType": "fullSeason",
-                "season": season,
-                "hydrate": "person(contract)",
-            },
-            timeout=15,
+        # Extract contract summary line e.g. "Signed thru 2028, 6 yr/$115M"
+        contract_note = None
+        note_m = re.search(
+            r"(Signed thru[^<]{5,60}|Free Agent|Pre-Arb|Arbitration eligible[^<]{0,40})",
+            html,
         )
-        resp.raise_for_status()
-        for entry in resp.json().get("roster", []):
-            if entry.get("person", {}).get("id") == player_id:
-                c = entry.get("person", {}).get("contract", {})
-                sal = c.get("salary")
-                if sal:
-                    return int(sal)
-    except Exception as e:
-        logger.debug(f"Roster contract attempt failed: {e}")
+        if note_m:
+            contract_note = note_m.group(1).strip()
 
-    return None
+        return salary, contract_note
+
+    # Fallback: try BBRef search redirect
+    try:
+        search_resp = requests.get(
+            "https://www.baseball-reference.com/search/search.fcgi",
+            params={"search": full_name},
+            headers=_BREF_HEADERS,
+            timeout=15,
+            allow_redirects=True,
+        )
+        if search_resp.status_code == 200 and "/players/" in search_resp.url:
+            html = search_resp.text
+            salary_pattern = re.compile(
+                r'data-year="' + re.escape(season) + r'"[^>]*data-amount="([0-9.]+)"'
+                r'|data-amount="([0-9.]+)"[^>]*data-year="' + re.escape(season) + r'"'
+            )
+            m = salary_pattern.search(html)
+            salary = None
+            if m:
+                raw = m.group(1) or m.group(2)
+                try:
+                    salary = int(float(raw))
+                except ValueError:
+                    pass
+            note_m = re.search(
+                r"(Signed thru[^<]{5,60}|Free Agent|Pre-Arb|Arbitration eligible[^<]{0,40})",
+                html,
+            )
+            contract_note = note_m.group(1).strip() if note_m else None
+            return salary, contract_note
+    except Exception as e:
+        logger.debug(f"BBRef search fallback failed: {e}")
+
+    return None, None
 
 
 def _fetch_season_stats(player_id: int, group: str) -> Optional[dict]:
@@ -291,17 +351,21 @@ def _per(salary: int, denom, unit: str) -> Optional[str]:
 
 
 def _build_contract_message(player: dict) -> str:
-    pid    = player["id"]
     name   = player["fullName"]
     pos    = player.get("primaryPosition", {}).get("abbreviation", "")
     season = _current_season()
     is_pitcher = pos in PITCHER_POSITIONS
     group  = "pitching" if is_pitcher else "hitting"
+    pid    = player["id"]
 
-    salary = _fetch_salary(pid)
+    salary, contract_note = _fetch_bref_salary(name)
     stats  = _fetch_season_stats(pid, group)
 
     lines = [f"<b>💰 {name} — {season} Contract</b>", f"<i>{pos}</i>", ""]
+
+    if contract_note:
+        lines.append(f"<i>{contract_note}</i>")
+        lines.append("")
 
     if salary:
         lines.append(f"<b>{season} salary: ${salary:,}</b>")
@@ -322,7 +386,6 @@ def _build_contract_message(player: dict) -> str:
                     facts.append(_per(salary, hrs, "home run"))
                 facts.append(_per(salary, stats.get("atBats"),       "at-bat"))
 
-        # Always include $/day as a fun baseline
         facts.append(f"${salary / 365:,.0f} per day (including off-season)")
 
         for f in facts:
@@ -332,7 +395,7 @@ def _build_contract_message(player: dict) -> str:
         if not any(facts):
             lines.append("• Season stats not yet available for per-stat breakdowns.")
     else:
-        lines.append("Salary data isn't publicly available via the MLB API for this player.")
+        lines.append("Salary data not found on Baseball Reference for this player.")
         lines.append("")
         if stats:
             lines.append("<b>Season stats so far:</b>")
@@ -342,10 +405,12 @@ def _build_contract_message(player: dict) -> str:
                              f"ERA {stats.get('era', '?')}")
             else:
                 lines.append(f"• {stats.get('gamesPlayed', '?')} G, "
-                             f".{str(stats.get('avg', '.000')).lstrip('.')} AVG, "
+                             f"{stats.get('avg', '.000')} AVG, "
                              f"{stats.get('homeRuns', '?')} HR, "
                              f"{stats.get('rbi', '?')} RBI")
 
+    lines.append("")
+    lines.append("<i>Salary data via Baseball Reference</i>")
     return "\n".join(lines)
 
 
