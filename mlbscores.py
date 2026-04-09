@@ -224,12 +224,17 @@ async def post_monday_standings(context) -> None:
 
 
 async def post_yesterday_to_channel(context) -> None:
-    """Daily job: post yesterday's Nationals result to the lineup channel at 9:30 AM CT."""
+    """Daily job: post yesterday's Nationals result + condensed game link to the lineup channel at 9:30 AM CT."""
     if not LINEUP_CHANNEL_ID:
         return
     try:
         message = await asyncio.to_thread(get_yesterday_scores, NATIONALS_TEAM_ID)
         if message is not None:
+            # Try to get condensed game link
+            condensed_link = await asyncio.to_thread(_get_condensed_game_link)
+            if condensed_link:
+                message += f"\n\n📹 <a href=\"{condensed_link}\">Watch Condensed Game</a>"
+            
             await context.bot.send_message(
                 chat_id=LINEUP_CHANNEL_ID,
                 text=message,
@@ -240,6 +245,50 @@ async def post_yesterday_to_channel(context) -> None:
             logger.info("No Nationals game yesterday — skipping channel post")
     except Exception as e:
         logger.error(f"Error posting yesterday's scores to channel: {e}")
+
+
+def _get_condensed_game_link() -> Optional[str]:
+    """Get the condensed game MP4 link from yesterday's Nationals game."""
+    yesterday = date.today() - timedelta(days=1)
+    try:
+        # Get yesterday's game
+        sched = statsapi.schedule(team=NATIONALS_TEAM_ID, date=yesterday)
+        if not sched:
+            return None
+        
+        game = sched[0]
+        game_pk = game.get('game_id') or game.get('gamePk')
+        if not game_pk:
+            return None
+        
+        # Fetch game content to find condensed game
+        base_url = "https://statsapi.mlb.com/api/v1"
+        content_url = f"{base_url}/game/{game_pk}/content"
+        
+        resp = requests.get(content_url, timeout=15)
+        resp.raise_for_status()
+        content_data = resp.json()
+        
+        # Look for condensed game in highlights or editorial content
+        for section in ['highlights', 'editorial']:
+            for category in content_data.get(section, {}).values():
+                if isinstance(category, dict):
+                    for item in category.get('items', []):
+                        title = item.get('title', '').lower()
+                        headline = item.get('headline', '').lower()
+                        if 'condensed' in title or 'condensed' in headline:
+                            # Find best quality MP4
+                            for playback in item.get('playbacks', []):
+                                if playback.get('name') in ['mp4Avc', 'flash1800k', 'flash1200k']:
+                                    return playback.get('url')
+                            # Fallback to first available URL
+                            if item.get('playbacks'):
+                                return item['playbacks'][0].get('url')
+        
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching condensed game link: {e}")
+        return None
 
 
 def schedule(team_id: int, user_timezone: str) -> str:
