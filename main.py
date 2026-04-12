@@ -11,7 +11,7 @@ from mlbscores import (
     get_past_games, live_scores, _format_standings, schedule,
     get_past_games_scores, _get_live_scores_text,
 )
-from stats import get_abs_challenge_stats, get_nationals_team_stats, get_roster_moves, get_weekly_digest, fetch_new_transactions
+from stats import get_nationals_team_stats, get_roster_moves, get_weekly_digest, fetch_new_transactions
 from lineup_notifier import add_subscriber, remove_subscriber, check_and_notify
 from player import get_splits, get_contract
 from highlights import get_nationals_highlights
@@ -214,15 +214,11 @@ async def stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Handle stats selection from menu."""
     query = update.callback_query
     await query.answer()
-    
+
     if query.data == "stats_team":
         stats_text = await get_nationals_team_stats()
         await query.edit_message_text(text=stats_text, parse_mode="HTML")
         logger.debug("User checked Nationals team stats")
-    elif query.data == "stats_abs":
-        stats_text = await get_abs_challenge_stats()
-        await query.edit_message_text(text=stats_text, parse_mode="HTML")
-        logger.debug("User checked ABS challenge stats")
 
 async def splits_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /splits PlayerName — show hitting/pitching splits."""
@@ -482,7 +478,7 @@ def main():
         highlights_job = job_queue.run_daily(
             post_weekly_highlights,
             time=time(11, 30, tzinfo=tz),  # 11:30 AM CT = 12:30 PM ET
-            days=(2,),                      # Wednesday only (0=Mon … 2=Wed)
+            days=(3,),                      # Wednesday only (0=Sun … 3=Wed)
         )
         logger.info(f"Weekly highlights job scheduled: {highlights_job}")
 
@@ -490,7 +486,7 @@ def main():
         monday_standings_job = job_queue.run_daily(
             post_monday_standings,
             time=time(9, 0, tzinfo=tz),
-            days=(0,),  # Monday only (0=Mon)
+            days=(1,),  # Monday only (0=Sun … 1=Mon)
         )
         logger.info(f"Monday standings job scheduled: {monday_standings_job}")
 
@@ -512,7 +508,7 @@ def main():
         weekly_job = job_queue.run_daily(
             post_weekly_digest,
             time=time(18, 0, tzinfo=tz),
-            days=(4,),  # Friday only
+            days=(5,),  # Friday only (0=Sun … 5=Fri)
         )
         logger.info(f"Weekly digest job scheduled: {weekly_job}")
 

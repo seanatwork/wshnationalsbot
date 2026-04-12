@@ -99,7 +99,8 @@ def _format_lineup(game: dict) -> str | None:
     home_players = lineups.get("homePlayers", [])
     away_players = lineups.get("awayPlayers", [])
 
-    if not home_players and not away_players:
+    # Wait until BOTH teams have lineups before posting
+    if not home_players or not away_players:
         return None
 
     teams = game.get("teams", {})

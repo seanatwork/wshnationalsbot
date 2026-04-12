@@ -122,12 +122,67 @@ async def get_nationals_team_stats() -> Optional[str]:
             f"• HR allowed: <b>{hrall}</b>  {fmt('homeRuns', 'pitching', higher_is_better=False)}\n"
         )
 
+        # Append ABS challenge stats
+        abs_section = await _get_abs_section()
+        if abs_section:
+            message += f"\n{abs_section}"
+
         _set_cached(cache_key, message)
         return message
 
     except Exception as e:
         logger.error(f"Error fetching team stats: {e}")
         return "Sorry, couldn't fetch team stats right now. Please try again later."
+
+
+async def _get_abs_section() -> Optional[str]:
+    """Return a formatted ABS stats block for embedding into /stats, or None on failure."""
+    try:
+        resp = await asyncio.to_thread(
+            requests.get,
+            "https://baseballsavant.mlb.com/abs",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        html = resp.text
+
+        match = re.search(r"var absSummaryData\s*=\s*(\[.*?\]);", html, re.DOTALL)
+        if not match:
+            return None
+
+        summary = json.loads(match.group(1))
+        if not summary:
+            return None
+
+        total_challenges = sum(int(d.get("challenges", 0)) for d in summary)
+        total_overturns = sum(int(d.get("overturns", 0)) for d in summary)
+        if total_challenges == 0:
+            return None
+
+        overturn_rate = total_overturns / total_challenges * 100
+
+        rolling_rate = None
+        for d in reversed(summary):
+            r = d.get("rolling_overturn_rate_week")
+            if r is not None:
+                rolling_rate = float(r) * 100
+                break
+
+        latest_date = summary[-1].get("game_date", "")
+
+        lines = [
+            f"<b>ABS Challenge Stats</b>  <i>through {latest_date}</i>",
+            f"• Challenges: {total_challenges}  • Overturns: {total_overturns}",
+            f"• Overturn Rate: <b>{overturn_rate:.1f}%</b>",
+        ]
+        if rolling_rate is not None:
+            lines.append(f"• 7-Day Rolling Rate: <b>{rolling_rate:.1f}%</b>")
+
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Error fetching ABS stats for /stats: {e}")
+        return None
 
 
 async def get_roster_moves() -> str:
@@ -285,69 +340,3 @@ async def get_weekly_digest() -> str:
         lines.append("No news items this week.")
 
     return "\n".join(lines)
-
-
-async def get_abs_challenge_stats() -> Optional[str]:
-    """Get league-wide ABS challenge stats scraped from Baseball Savant."""
-    cache_key = f"abs_stats_{date.today()}"
-    cached = _get_cached(cache_key, _TTL_STATS)
-    if cached is not None:
-        return cached
-
-    try:
-        resp = await asyncio.to_thread(
-            requests.get,
-            "https://baseballsavant.mlb.com/abs",
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        html = resp.text
-
-        # Extract the absSummaryData JS variable from the embedded script
-        match = re.search(r"var absSummaryData\s*=\s*(\[.*?\]);", html, re.DOTALL)
-        if not match:
-            return "ABS challenge data not available right now."
-
-        summary = json.loads(match.group(1))
-        if not summary:
-            return "ABS challenge data not available right now."
-
-        total_challenges = sum(int(d.get("challenges", 0)) for d in summary)
-        total_overturns = sum(int(d.get("overturns", 0)) for d in summary)
-        if total_challenges == 0:
-            return "No ABS challenge data yet for this season."
-
-        overturn_rate = total_overturns / total_challenges * 100
-
-        # Most recent rolling weekly rate (last entry that has it)
-        rolling_rate = None
-        for d in reversed(summary):
-            r = d.get("rolling_overturn_rate_week")
-            if r is not None:
-                rolling_rate = float(r) * 100
-                break
-
-        current_year = date.today().year
-        if date.today().month < 3:
-            current_year -= 1
-
-        latest_date = summary[-1].get("game_date", "")
-
-        message = (
-            f"<b>⚾ ABS Challenge Stats - {current_year} Season</b>\n"
-            f"<i>Through {latest_date}</i>\n\n"
-            f"<b>Season Totals:</b>\n"
-            f"• Challenges: {total_challenges}\n"
-            f"• Overturns: {total_overturns}\n"
-            f"• Overturn Rate: <b>{overturn_rate:.1f}%</b>\n"
-        )
-        if rolling_rate is not None:
-            message += f"• 7-Day Rolling Rate: <b>{rolling_rate:.1f}%</b>\n"
-
-        _set_cached(cache_key, message)
-        return message
-
-    except Exception as e:
-        logger.error(f"Error fetching ABS stats: {e}")
-        return "Sorry, couldn't fetch ABS challenge data right now. Please try again later."
