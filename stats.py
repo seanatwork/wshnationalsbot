@@ -147,11 +147,12 @@ async def _get_abs_section() -> Optional[str]:
         resp.raise_for_status()
         html = resp.text
 
-        match = re.search(r"var absSummaryData\s*=\s*(\[.*?\]);", html, re.DOTALL)
-        if not match:
+        # Page uses `const` (not `var`) as of 2026
+        summary_match = re.search(r"(?:var|const|let)\s+absSummaryData\s*=\s*(\[.*?\]);", html, re.DOTALL)
+        if not summary_match:
             return None
 
-        summary = json.loads(match.group(1))
+        summary = json.loads(summary_match.group(1))
         if not summary:
             return None
 
@@ -169,15 +170,49 @@ async def _get_abs_section() -> Optional[str]:
                 rolling_rate = float(r) * 100
                 break
 
-        latest_date = summary[-1].get("game_date", "")
+        latest_date_raw = summary[-1].get("game_date", "")
+        try:
+            from datetime import datetime as _dt
+            latest_date = _dt.fromisoformat(latest_date_raw.replace("Z", "")).strftime("%b %-d")
+        except Exception:
+            latest_date = latest_date_raw
 
         lines = [
             f"<b>ABS Challenge Stats</b>  <i>through {latest_date}</i>",
-            f"• Challenges: {total_challenges}  • Overturns: {total_overturns}",
-            f"• Overturn Rate: <b>{overturn_rate:.1f}%</b>",
+            f"• League: {total_challenges} challenges · {total_overturns} overturns · <b>{overturn_rate:.1f}%</b> rate",
         ]
         if rolling_rate is not None:
             lines.append(f"• 7-Day Rolling Rate: <b>{rolling_rate:.1f}%</b>")
+
+        # Nationals-specific team data
+        team_match = re.search(r"(?:var|const|let)\s+teamData\s*=\s*(\[[\s\S]*?\]);", html)
+        if team_match:
+            team_data = json.loads(team_match.group(1))
+            nats = next((d for d in team_data if str(d.get("id")) == "120"), None)
+            if nats:
+                bat_for   = int(nats.get("bat_for", 0))
+                fld_for   = int(nats.get("fld_for", 0))
+                bat_against = int(nats.get("bat_against", 0))
+                fld_against = int(nats.get("fld_against", 0))
+                wins   = bat_for + fld_for
+                losses = bat_against + fld_against
+                total  = wins + losses
+                nats_rate = wins / total * 100 if total > 0 else 0
+
+                # Rank by wins among all 30 teams
+                wins_by_team = sorted(
+                    [int(d.get("bat_for", 0)) + int(d.get("fld_for", 0)) for d in team_data],
+                    reverse=True,
+                )
+                nats_rank = wins_by_team.index(wins) + 1
+
+                lines += [
+                    "",
+                    "<b>Nationals</b>",
+                    f"• Batting: {bat_for} won · {bat_against} lost to opponents",
+                    f"• Fielding: {fld_for} won · {fld_against} lost to opponents",
+                    f"• Overall: {wins} wins · {losses} losses · <b>{nats_rate:.0f}%</b>  (#{nats_rank}/30 MLB)",
+                ]
 
         return "\n".join(lines)
     except Exception as e:
