@@ -496,6 +496,9 @@ def main():
                 return
             try:
                 text = await get_weekly_digest()
+                if not text:
+                    logger.info("No news items this week — skipping weekly digest post")
+                    return
                 await context.bot.send_message(
                     chat_id=LINEUP_CHANNEL_ID,
                     text=text,

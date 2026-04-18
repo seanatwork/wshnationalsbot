@@ -4,6 +4,7 @@ import json
 import re
 import time
 import xml.etree.ElementTree as ET
+from pathlib import Path
 import statsapi
 import requests
 from datetime import datetime, date, timedelta
@@ -277,22 +278,35 @@ async def get_roster_moves() -> str:
         return "Sorry, couldn't fetch roster moves right now. Please try again later."
 
 
-# Track alerted transaction IDs — resets on restart, which is fine
-_alerted_transaction_ids: set = set()
-_alerted_date: date | None = None
+_TRANSACTION_STATE_FILE = Path(__file__).parent / ".transaction_state.json"
+
+
+def _load_transaction_state() -> tuple[date | None, set]:
+    try:
+        data = json.loads(_TRANSACTION_STATE_FILE.read_text())
+        saved_date = date.fromisoformat(data["date"])
+        return saved_date, set(data["ids"])
+    except Exception:
+        return None, set()
+
+
+def _save_transaction_state(d: date, ids: set) -> None:
+    try:
+        _TRANSACTION_STATE_FILE.write_text(json.dumps({"date": d.isoformat(), "ids": list(ids)}))
+    except Exception as e:
+        logger.error(f"Failed to persist transaction state: {e}")
 
 
 def fetch_new_transactions() -> list[str]:
     """
     Return descriptions of any transactions posted today that haven't been alerted yet.
-    Resets the seen-set daily so IDs don't accumulate across days.
+    State is persisted to disk so restarts don't trigger duplicate alerts.
     """
-    global _alerted_transaction_ids, _alerted_date
     today = date.today()
+    saved_date, alerted_ids = _load_transaction_state()
 
-    if _alerted_date != today:
-        _alerted_transaction_ids = set()
-        _alerted_date = today
+    if saved_date != today:
+        alerted_ids = set()
 
     try:
         resp = requests.get(
@@ -311,10 +325,12 @@ def fetch_new_transactions() -> list[str]:
         for t in transactions:
             tid  = t.get("id") or t.get("description", "")
             desc = t.get("description", "").strip()
-            if not desc or tid in _alerted_transaction_ids:
+            if not desc or tid in alerted_ids:
                 continue
-            _alerted_transaction_ids.add(tid)
+            alerted_ids.add(tid)
             new.append(desc)
+        if new:
+            _save_transaction_state(today, alerted_ids)
         return new
     except Exception as e:
         logger.error(f"Error fetching transactions: {e}")
@@ -354,9 +370,12 @@ def _fetch_nationals_news() -> list[str]:
         return []
 
 
-async def get_weekly_digest() -> str:
-    """Build the Friday weekly digest: news headlines only (transactions posted same-day now)."""
+async def get_weekly_digest() -> str | None:
+    """Build the Friday weekly digest. Returns None if there are no news items."""
     news = await asyncio.to_thread(_fetch_nationals_news)
+
+    if not news:
+        return None
 
     today = date.today()
     week_start = (today - timedelta(days=6)).strftime("%b %-d")
@@ -368,10 +387,6 @@ async def get_weekly_digest() -> str:
         "",
         "<b>📰 News &amp; Notes</b>",
     ]
-
-    if news:
-        lines.extend(news)
-    else:
-        lines.append("No news items this week.")
+    lines.extend(news)
 
     return "\n".join(lines)
